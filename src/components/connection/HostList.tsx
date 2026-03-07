@@ -43,6 +43,7 @@ export function HostList({ onConnect, onOpenLocal, onSwitchEdit }: HostListProps
     useConnectionStore.getState().addConnection({
       id, name: "", host: "", port: 22,
       username: "root", authType: "password", group: "Default",
+      password: "", keyPath: "", keyPassphrase: "",
     });
     setSelectedHostId(id);
     setEditingHostId(id);
@@ -84,6 +85,7 @@ export function HostList({ onConnect, onOpenLocal, onSwitchEdit }: HostListProps
       id: crypto.randomUUID(),
       name: `${username}@${host}`,
       host, port, username, authType: "password", group: "Quick Connect",
+      password: "", keyPath: "", keyPassphrase: "",
     });
   }, [search, onConnect]);
 
@@ -129,7 +131,7 @@ export function HostList({ onConnect, onOpenLocal, onSwitchEdit }: HostListProps
           <ContextMenuTrigger asChild>
             <button
               className={cn(
-                "group flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-colors",
+                "group flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
                 selectedHostId === conn.id
                   ? "border-primary/40 bg-muted/30 hover:bg-accent/50"
                   : "border-transparent bg-muted/30 hover:bg-accent/50"

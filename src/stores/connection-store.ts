@@ -1,56 +1,69 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import {
+  getConnections,
+  saveConnection,
+  deleteConnection,
+  type ConnectionInfo,
+} from "@/lib/tauri";
 
-export interface ConnectionInfo {
-  id: string;
-  name: string;
-  host: string;
-  port: number;
-  username: string;
-  authType: "password" | "key";
-  group: string;
-  password?: string;
-  keyPath?: string;
-  keyPassphrase?: string;
-}
+export type { ConnectionInfo } from "@/lib/tauri";
 
 interface ConnectionState {
   connections: ConnectionInfo[];
   groups: string[];
-  addConnection: (conn: ConnectionInfo) => void;
-  updateConnection: (id: string, conn: Partial<ConnectionInfo>) => void;
-  removeConnection: (id: string) => void;
+  loaded: boolean;
+  loadConnections: () => Promise<void>;
+  addConnection: (conn: ConnectionInfo) => Promise<void>;
+  updateConnection: (id: string, partial: Partial<ConnectionInfo>) => Promise<void>;
+  removeConnection: (id: string) => Promise<void>;
 }
 
-export const useConnectionStore = create<ConnectionState>()(
-  persist(
-    (set) => ({
-      connections: [],
-      groups: ["Default"],
+export const useConnectionStore = create<ConnectionState>()((set, get) => ({
+  connections: [],
+  groups: ["Default"],
+  loaded: false,
 
-      addConnection: (conn) =>
-        set((state) => ({
-          connections: [...state.connections, conn],
-        })),
-
-      updateConnection: (id, partial) =>
-        set((state) => ({
-          connections: state.connections.map((c) =>
-            c.id === id ? { ...c, ...partial } : c
-          ),
-        })),
-
-      removeConnection: (id) =>
-        set((state) => ({
-          connections: state.connections.filter((c) => c.id !== id),
-        })),
-    }),
-    {
-      name: "termix-connections",
-      partialize: (state) => ({
-        connections: state.connections.map(({ password, keyPassphrase, ...rest }) => rest),
-        groups: state.groups,
-      }),
+  loadConnections: async () => {
+    try {
+      const connections = await getConnections();
+      set({ connections, loaded: true });
+    } catch (e) {
+      console.warn("Failed to load connections from backend:", e);
+      set({ loaded: true });
     }
-  )
-);
+  },
+
+  addConnection: async (conn) => {
+    set((state) => ({ connections: [...state.connections, conn] }));
+    try {
+      await saveConnection(conn);
+    } catch (e) {
+      console.warn("Failed to save connection:", e);
+    }
+  },
+
+  updateConnection: async (id, partial) => {
+    const existing = get().connections.find((c) => c.id === id);
+    if (!existing) return;
+    const updated = { ...existing, ...partial };
+    set((state) => ({
+      connections: state.connections.map((c) => (c.id === id ? updated : c)),
+    }));
+    try {
+      await saveConnection(updated);
+    } catch (e) {
+      console.warn("Failed to update connection:", e);
+    }
+  },
+
+  removeConnection: async (id) => {
+    set((state) => ({
+      connections: state.connections.filter((c) => c.id !== id),
+    }));
+    try {
+      await deleteConnection(id);
+    } catch (e) {
+      console.warn("Failed to delete connection:", e);
+    }
+  },
+}));

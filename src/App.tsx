@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
@@ -45,6 +45,12 @@ function App() {
 
   const [showHostDiscard, setShowHostDiscard] = useState(false);
   const pendingEditHostRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    useSettingsStore.getState().loadSettings();
+    useConnectionStore.getState().loadConnections();
+    useSnippetStore.getState().loadSnippets();
+  }, []);
 
   const {
     handleConnect,

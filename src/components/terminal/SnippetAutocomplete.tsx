@@ -78,7 +78,7 @@ export function SnippetAutocomplete({
           <button
             key={snippet.id}
             className={cn(
-              "flex items-center gap-2 px-2.5 py-1.5 text-xs transition-colors w-full text-left",
+              "flex items-center gap-2 px-2.5 py-1.5 text-xs transition-colors w-full text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
               i === selectedIndex
                 ? "bg-accent text-accent-foreground"
                 : "hover:bg-accent/50"
