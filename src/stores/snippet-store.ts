@@ -1,12 +1,15 @@
-import { create } from "zustand";
+import { createLogger } from "@/lib/logger";
 import {
-  getSnippets,
-  saveSnippet,
-  deleteSnippet,
-  type Snippet,
+    deleteSnippet,
+    getSnippets,
+    saveSnippet,
+    type Snippet,
 } from "@/lib/tauri";
+import { create } from "zustand";
 
 export type { Snippet } from "@/lib/tauri";
+
+const logger = createLogger("snippet-store");
 
 export function isSnippetEmpty(s: Snippet): boolean {
   return !s.name.trim() && !s.content.trim() && (s.tags ?? []).length === 0;
@@ -30,42 +33,44 @@ export const useSnippetStore = create<SnippetState>()((set, get) => ({
       const snippets = await getSnippets();
       set({ snippets, loaded: true });
     } catch (e) {
-      console.warn("Failed to load snippets from backend:", e);
+      logger.warn("Failed to load snippets:", e);
       set({ loaded: true });
     }
   },
 
   addSnippet: async (snippet) => {
-    set((state) => ({ snippets: [...state.snippets, snippet] }));
+    const prev = get().snippets;
+    set({ snippets: [...prev, snippet] });
     try {
       await saveSnippet(snippet);
     } catch (e) {
-      console.warn("Failed to save snippet:", e);
+      logger.warn("Failed to save snippet, rolling back:", e);
+      set({ snippets: prev });
     }
   },
 
   updateSnippet: async (id, partial) => {
-    const existing = get().snippets.find((s) => s.id === id);
+    const prev = get().snippets;
+    const existing = prev.find((s) => s.id === id);
     if (!existing) return;
     const updated = { ...existing, ...partial };
-    set((state) => ({
-      snippets: state.snippets.map((s) => (s.id === id ? updated : s)),
-    }));
+    set({ snippets: prev.map((s) => (s.id === id ? updated : s)) });
     try {
       await saveSnippet(updated);
     } catch (e) {
-      console.warn("Failed to update snippet:", e);
+      logger.warn("Failed to update snippet, rolling back:", e);
+      set({ snippets: prev });
     }
   },
 
   removeSnippet: async (id) => {
-    set((state) => ({
-      snippets: state.snippets.filter((s) => s.id !== id),
-    }));
+    const prev = get().snippets;
+    set({ snippets: prev.filter((s) => s.id !== id) });
     try {
       await deleteSnippet(id);
     } catch (e) {
-      console.warn("Failed to delete snippet:", e);
+      logger.warn("Failed to delete snippet, rolling back:", e);
+      set({ snippets: prev });
     }
   },
 }));

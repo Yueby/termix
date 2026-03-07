@@ -1,31 +1,37 @@
-import { useEffect, useState } from "react";
-import { Loader2, CheckCircle2, XCircle, RefreshCw, Settings, Terminal, Cloud } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
-import { useSettingsStore } from "@/stores/settings-store";
-import { terminalThemes } from "@/lib/terminal-themes";
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  detectShells,
-  syncPush,
-  syncPull,
-  syncTestConnection,
-  type ShellProfile,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import { createLogger } from "@/lib/logger";
+import {
+    detectShells,
+    syncPull,
+    syncPush,
+    syncTestConnection,
+    type ShellProfile,
 } from "@/lib/tauri";
+import { terminalThemes } from "@/lib/terminal-themes";
+import { cn } from "@/lib/utils";
+import { useConnectionStore } from "@/stores/connection-store";
+import { useKeychainStore } from "@/stores/keychain-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useSnippetStore } from "@/stores/snippet-store";
+import { CheckCircle2, Cloud, Loader2, RefreshCw, Settings, Terminal, XCircle } from "lucide-react";
+import { useEffect, useState } from "react";
+
+const logger = createLogger("settings");
 
 interface SettingsDialogProps {
   open: boolean;
@@ -52,9 +58,9 @@ function SettingRow({ label, children }: { label: string; children: React.ReactN
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const {
     theme, fontFamily, fontSize, cursorStyle, terminalThemeId, defaultShell,
-    webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir,
+    webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir, syncEncryptionPassword,
     setTheme, setFontFamily, setFontSize, setCursorStyle, setTerminalThemeId, setDefaultShell,
-    setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir,
+    setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir, setSyncEncryptionPassword,
   } = useSettingsStore();
 
   const [activeNav, setActiveNav] = useState<NavId>("general");
@@ -64,7 +70,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   useEffect(() => {
     if (open) {
-      detectShells().then(setShells).catch(console.error);
+      detectShells().then(setShells).catch((e) => logger.warn("detectShells failed:", e));
       setSyncMessage(null);
     }
   }, [open]);
@@ -100,6 +106,12 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     setSyncMessage(null);
     try {
       const msg = await syncPull();
+      await Promise.all([
+        useConnectionStore.getState().loadConnections(),
+        useSnippetStore.getState().loadSnippets(),
+        useKeychainStore.getState().loadItems(),
+        useSettingsStore.getState().loadSettings(),
+      ]);
       setSyncMessage({ type: "success", text: msg });
     } catch (e) {
       setSyncMessage({ type: "error", text: String(e) });
@@ -274,6 +286,16 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                       placeholder="/termix"
                       value={webdavRemoteDir}
                       onChange={(e) => setWebdavRemoteDir(e.target.value)}
+                    />
+                  </SettingRow>
+
+                  <SettingRow label="Encryption Key">
+                    <Input
+                      className="w-[200px]"
+                      type="password"
+                      placeholder="For cross-device sync"
+                      value={syncEncryptionPassword}
+                      onChange={(e) => setSyncEncryptionPassword(e.target.value)}
                     />
                   </SettingRow>
                 </div>

@@ -1,14 +1,17 @@
-import { useEffect, useState, useCallback } from "react";
-import { Code2, X, Copy } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
-import { useSnippetStore, isSnippetEmpty, type Snippet } from "@/stores/snippet-store";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { createLogger } from "@/lib/logger";
+import { isSnippetEmpty, useSnippetStore, type Snippet } from "@/stores/snippet-store";
 import { useUiStore } from "@/stores/ui-store";
+import { Code2, Copy, X } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+
+const logger = createLogger("snippet");
 
 export function SnippetDetail() {
   const { editingSnippetId } = useUiStore();
@@ -37,7 +40,7 @@ export function SnippetDetail() {
     if (snippet) {
       setName(snippet.name);
       setContent(snippet.content);
-      setTags(snippet.tags);
+      setTags(snippet.tags ?? []);
       setTagsInput("");
     }
   }, [editingSnippetId]);
@@ -78,7 +81,7 @@ export function SnippetDetail() {
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(content).catch(() => {});
+    navigator.clipboard.writeText(content).catch((e) => logger.warn("Clipboard write failed:", e));
   };
 
   return (

@@ -19,6 +19,8 @@ pub struct AppSettings {
     pub webdav_username: String,
     pub webdav_password: String,
     pub webdav_remote_dir: String,
+    #[serde(default)]
+    pub sync_encryption_password: String,
 }
 
 impl Default for AppSettings {
@@ -35,6 +37,7 @@ impl Default for AppSettings {
             webdav_username: String::new(),
             webdav_password: String::new(),
             webdav_remote_dir: "/termix".to_string(),
+            sync_encryption_password: String::new(),
         }
     }
 }
@@ -43,6 +46,7 @@ impl Default for AppSettings {
 pub async fn get_settings(db: State<'_, Database>) -> Result<AppSettings, String> {
     let mut s = db.get_settings().await.map_err(|e| e.to_string())?;
     s.webdav_password = crypto::decrypt(&s.webdav_password).unwrap_or_default();
+    s.sync_encryption_password = crypto::decrypt(&s.sync_encryption_password).unwrap_or_default();
     Ok(s)
 }
 
@@ -52,5 +56,6 @@ pub async fn save_settings(
     db: State<'_, Database>,
 ) -> Result<(), String> {
     settings.webdav_password = crypto::encrypt(&settings.webdav_password).map_err(|e| e.to_string())?;
+    settings.sync_encryption_password = crypto::encrypt(&settings.sync_encryption_password).map_err(|e| e.to_string())?;
     db.save_settings(&settings).await.map_err(|e| e.to_string())
 }

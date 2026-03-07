@@ -1,6 +1,16 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { Loader2 } from "lucide-react";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConnectionProgress } from "@/components/connection/ConnectionProgress";
+import { HostDetail } from "@/components/connection/HostDetail";
+import { HostList } from "@/components/connection/HostList";
+import { KeychainDetail } from "@/components/keychain/KeychainDetail";
+import { KeychainList } from "@/components/keychain/KeychainList";
+import { CommandPalette } from "@/components/layout/CommandPalette";
+import { NavSidebar } from "@/components/layout/NavSidebar";
+import { SettingsDialog } from "@/components/layout/SettingsDialog";
+import { TitleBar } from "@/components/layout/TitleBar";
+import { SftpPage } from "@/components/sftp/SftpPage";
+import { SnippetDetail } from "@/components/snippet/SnippetDetail";
+import { SnippetList } from "@/components/snippet/SnippetList";
+import { TerminalView } from "@/components/terminal/Terminal";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,24 +21,18 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { TitleBar } from "@/components/layout/TitleBar";
-import { NavSidebar } from "@/components/layout/NavSidebar";
-import { HostList } from "@/components/connection/HostList";
-import { HostDetail } from "@/components/connection/HostDetail";
-import { SnippetList } from "@/components/snippet/SnippetList";
-import { SnippetDetail } from "@/components/snippet/SnippetDetail";
-import { ConnectionProgress } from "@/components/connection/ConnectionProgress";
-import { TerminalView } from "@/components/terminal/Terminal";
-import { CommandPalette } from "@/components/layout/CommandPalette";
-import { SettingsDialog } from "@/components/layout/SettingsDialog";
-import { useSessionStore } from "@/stores/session-store";
-import { useUiStore } from "@/stores/ui-store";
-import { useSettingsStore } from "@/stores/settings-store";
-import { useConnectionStore } from "@/stores/connection-store";
-import { useSnippetStore, isSnippetEmpty } from "@/stores/snippet-store";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { useConnectionHandlers } from "@/hooks/use-connection";
 import { getThemeById } from "@/lib/terminal-themes";
 import { cn } from "@/lib/utils";
+import { useConnectionStore } from "@/stores/connection-store";
+import { useSessionStore } from "@/stores/session-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { isKeychainItemEmpty, useKeychainStore } from "@/stores/keychain-store";
+import { isSnippetEmpty, useSnippetStore } from "@/stores/snippet-store";
+import { useUiStore } from "@/stores/ui-store";
+import { Loader2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 function SlidingPanel({ open, children }: { open: boolean; children: React.ReactNode }) {
   return (
@@ -40,7 +44,7 @@ function SlidingPanel({ open, children }: { open: boolean; children: React.React
 
 function App() {
   const { tabs, activeTabId } = useSessionStore();
-  const { navPage, editingHostId, editingSnippetId, settingsOpen, setSettingsOpen } = useUiStore();
+  const { navPage, activeView, detailPanel, settingsOpen, setSettingsOpen } = useUiStore();
   const { terminalThemeId } = useSettingsStore();
 
   const [showHostDiscard, setShowHostDiscard] = useState(false);
@@ -50,6 +54,7 @@ function App() {
     useSettingsStore.getState().loadSettings();
     useConnectionStore.getState().loadConnections();
     useSnippetStore.getState().loadSnippets();
+    useKeychainStore.getState().loadItems();
   }, []);
 
   const {
@@ -58,6 +63,8 @@ function App() {
     handleRetry,
     handleDisconnect,
     handleCloseTab,
+    handleCloseOtherTabs,
+    handleCloseAllTabs,
     handleOpenLocal,
   } = useConnectionHandlers();
 
@@ -91,19 +98,33 @@ function App() {
     setEditingSnippetId(null);
   }, []);
 
+  const handleTryCloseKeychainDetail = useCallback(() => {
+    const { editingKeychainId, setEditingKeychainId, selectedKeychainId, setSelectedKeychainId } = useUiStore.getState();
+    if (!editingKeychainId) return;
+    const item = useKeychainStore.getState().items.find((k) => k.id === editingKeychainId);
+    if (item && isKeychainItemEmpty(item)) {
+      useKeychainStore.getState().removeItem(editingKeychainId);
+      if (selectedKeychainId === editingKeychainId) setSelectedKeychainId(null);
+    }
+    setEditingKeychainId(null);
+  }, []);
+
   const handleContentAreaClick = useCallback((e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest("button, a, input, select, textarea, [role='button'], [data-radix-menu-content]")) return;
     if (e.detail === 0) return;
-    const { navPage, setSelectedHostId, setSelectedSnippetId } = useUiStore.getState();
+    const { navPage, setSelectedHostId, setSelectedSnippetId, setSelectedKeychainId } = useUiStore.getState();
     if (navPage === "hosts") {
       setSelectedHostId(null);
       handleTryCloseHostDetail();
     } else if (navPage === "snippets") {
       setSelectedSnippetId(null);
       handleTryCloseSnippetDetail();
+    } else if (navPage === "keychain") {
+      setSelectedKeychainId(null);
+      handleTryCloseKeychainDetail();
     }
-  }, [handleTryCloseHostDetail, handleTryCloseSnippetDetail]);
+  }, [handleTryCloseHostDetail, handleTryCloseSnippetDetail, handleTryCloseKeychainDetail]);
 
   const handleSwitchEditHost = useCallback((targetId: string) => {
     const { editingHostId, setEditingHostId, setSelectedHostId } = useUiStore.getState();
@@ -117,6 +138,10 @@ function App() {
     }
     setSelectedHostId(targetId);
     setEditingHostId(targetId);
+  }, []);
+
+  const handleEditHost = useCallback((connectionId: string) => {
+    useUiStore.getState().setDetailPanel({ type: "host", id: connectionId, source: "ssh-tab" });
   }, []);
 
   const handleDiscardHost = useCallback(() => {
@@ -144,33 +169,39 @@ function App() {
       >
         <TitleBar
           onCloseTab={handleCloseTab}
+          onCloseOtherTabs={handleCloseOtherTabs}
+          onCloseAllTabs={handleCloseAllTabs}
           terminalBg={activeIsConnectedTerminal ? terminalBg : undefined}
           themeAccent={themeAccent}
           themeVariant={terminalTheme.variant}
         />
 
         <div className="flex flex-1 min-h-0">
-          {isHome && <NavSidebar />}
+          {isHome && activeView !== "sftp" && <NavSidebar />}
 
           <main className="flex-1 min-w-0 relative">
-            <div className={isHome ? "flex h-full bg-content" : "hidden"}>
-              <div className="flex-1 min-w-0" onClick={handleContentAreaClick}>
+            {isHome && activeView === "sftp" && (
+              <div className="h-full bg-content animate-in fade-in-0 duration-150">
+                <SftpPage />
+              </div>
+            )}
+
+            <div className={isHome && activeView !== "sftp" ? "h-full bg-content" : "hidden"}>
+              <div className="h-full" onClick={handleContentAreaClick}>
+                <div key={navPage} className="h-full animate-in fade-in-0 duration-150">
                 {navPage === "hosts" ? (
                   <HostList onConnect={handleConnect} onOpenLocal={handleOpenLocal} onSwitchEdit={handleSwitchEditHost} />
                 ) : navPage === "snippets" ? (
                   <SnippetList />
+                ) : navPage === "keychain" ? (
+                  <KeychainList />
                 ) : (
                   <div className="flex h-full items-center justify-center text-muted-foreground">
                     <p className="text-sm">{navPage} — coming soon</p>
                   </div>
                 )}
+                </div>
               </div>
-              <SlidingPanel open={!!editingHostId && navPage === "hosts"}>
-                <HostDetail onConnect={handleConnect} onClose={handleTryCloseHostDetail} />
-              </SlidingPanel>
-              <SlidingPanel open={!!editingSnippetId && navPage === "snippets"}>
-                <SnippetDetail />
-              </SlidingPanel>
             </div>
 
             {tabs.map((tab) => {
@@ -178,7 +209,7 @@ function App() {
 
               if (tab.status === "connected" && tab.sessionId) {
                 return (
-                  <div key={tab.id} className={isActive ? "absolute inset-0" : "absolute inset-0 invisible"}>
+                  <div key={tab.id} className={cn("absolute inset-0 animate-in fade-in-0 duration-150", !isActive && "invisible")}>
                     <TerminalView
                       sessionId={tab.sessionId}
                       isActive={isActive}
@@ -192,7 +223,7 @@ function App() {
               if (isActive) {
                 if (tab.type === "local") {
                   return (
-                    <div key={tab.id} className="absolute inset-0 flex items-center justify-center bg-background">
+                    <div key={tab.id} className="absolute inset-0 flex items-center justify-center bg-background animate-in fade-in-0 duration-150">
                       <div className="flex flex-col items-center gap-3 text-muted-foreground">
                         <Loader2 className="h-6 w-6 animate-spin" />
                         <p className="text-sm">
@@ -204,12 +235,13 @@ function App() {
                 }
 
                 return (
-                  <div key={tab.id} className="absolute inset-0 bg-content">
+                  <div key={tab.id} className="absolute inset-0 bg-content animate-in fade-in-0 duration-150">
                     <ConnectionProgress
                       tab={tab}
                       onSubmitAuth={handleSubmitAuth}
                       onClose={handleCloseTab}
                       onRetry={handleRetry}
+                      onEdit={handleEditHost}
                     />
                   </div>
                 );
@@ -218,6 +250,18 @@ function App() {
               return null;
             })}
           </main>
+
+          <SlidingPanel open={!!detailPanel}>
+            {detailPanel?.type === "host" && (
+              <HostDetail onConnect={handleConnect} onClose={handleTryCloseHostDetail} />
+            )}
+            {detailPanel?.type === "snippet" && (
+              <SnippetDetail />
+            )}
+            {detailPanel?.type === "keychain" && (
+              <KeychainDetail />
+            )}
+          </SlidingPanel>
         </div>
 
         <CommandPalette onConnect={handleConnect} />

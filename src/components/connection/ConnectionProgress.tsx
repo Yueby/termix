@@ -1,25 +1,28 @@
-import { useState, useRef, useEffect } from "react";
-import {
-  Cable,
-  KeyRound,
-  TerminalSquare,
-  Server,
-  X,
-  RotateCcw,
-  Check,
-  Loader2,
-} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
-import type { SessionTab, ConnectionStatus } from "@/stores/session-store";
+import type { ConnectionStatus, SessionTab } from "@/stores/session-store";
+import {
+    Cable,
+    Check,
+    KeyRound,
+    Loader2,
+    Pencil,
+    RotateCcw,
+    Server,
+    TerminalSquare,
+    X,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 interface ConnectionProgressProps {
   tab: SessionTab;
   onSubmitAuth: (tabId: string, password: string) => void;
   onClose: (tabId: string) => void;
   onRetry: (tabId: string) => void;
+  onEdit?: (connectionId: string) => void;
+  protocol?: string;
 }
 
 const STEPS = [
@@ -56,11 +59,20 @@ function getStatusText(status: ConnectionStatus, error: string | null): string {
   }
 }
 
-export function ConnectionProgress({ tab, onSubmitAuth, onClose, onRetry }: ConnectionProgressProps) {
+export function ConnectionProgress({ tab, onSubmitAuth, onClose, onRetry, onEdit, protocol = "SSH" }: ConnectionProgressProps) {
   const [password, setPassword] = useState("");
+  const [allDone, setAllDone] = useState(false);
   const isProgressing = ["connecting", "authenticating"].includes(tab.status);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const logs = tab.logs ?? [];
+
+  useEffect(() => {
+    if (tab.status === "connected") {
+      const timer = setTimeout(() => setAllDone(true), 150);
+      return () => clearTimeout(timer);
+    }
+    setAllDone(false);
+  }, [tab.status]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -81,7 +93,7 @@ export function ConnectionProgress({ tab, onSubmitAuth, onClose, onRetry }: Conn
           </div>
           <div className="flex-1 min-w-0">
             <h2 className="text-lg font-semibold truncate">{tab.title}</h2>
-            <p className="text-sm text-muted-foreground">SSH {tab.host}:{tab.port}</p>
+            <p className="text-sm text-muted-foreground">{protocol} {tab.host}:{tab.port}</p>
           </div>
         </div>
 
@@ -90,7 +102,7 @@ export function ConnectionProgress({ tab, onSubmitAuth, onClose, onRetry }: Conn
           <div className="mb-8">
             <div className="flex items-start">
               {STEPS.map((step, i) => {
-                const state = getStepState(step.key, tab.status);
+                const state = allDone && step.key === "connected" ? "done" : getStepState(step.key, tab.status);
                 const Icon = step.icon;
                 const lineActive = i < STEPS.length - 1 && getStepState(STEPS[i + 1].key, tab.status) !== "pending";
                 return (
@@ -167,6 +179,11 @@ export function ConnectionProgress({ tab, onSubmitAuth, onClose, onRetry }: Conn
               <Button variant="outline" onClick={() => onClose(tab.id)}>
                 <X className="mr-1.5 h-3.5 w-3.5" />Close
               </Button>
+              {onEdit && tab.connectionId && (
+                <Button variant="outline" onClick={() => onEdit(tab.connectionId)}>
+                  <Pencil className="mr-1.5 h-3.5 w-3.5" />Edit
+                </Button>
+              )}
               <Button onClick={() => onRetry(tab.id)}>
                 <RotateCcw className="mr-1.5 h-3.5 w-3.5" />Reconnect
               </Button>

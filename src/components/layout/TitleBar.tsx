@@ -1,32 +1,39 @@
-import { useRef } from "react";
 import {
-  Menu,
-  Server,
-  X,
-  Minus,
-  Square,
-  Terminal,
-  Loader2,
-  Wifi,
-  WifiOff,
-  Settings,
-  Info,
-  Palette,
-  Check,
-} from "lucide-react";
-import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
-import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useSessionStore } from "@/stores/session-store";
-import { useUiStore } from "@/stores/ui-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import { useContextMenu } from "@/hooks/use-context-menu";
+import { createLogger } from "@/lib/logger";
 import { terminalThemes } from "@/lib/terminal-themes";
+import { cn } from "@/lib/utils";
+import { useSessionStore } from "@/stores/session-store";
+import { useSettingsStore } from "@/stores/settings-store";
+import { useUiStore } from "@/stores/ui-store";
+import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
+import {
+    Check,
+    FolderOpen,
+    Info,
+    Loader2,
+    Menu,
+    Minus,
+    Palette,
+    Pencil,
+    Server,
+    Settings,
+    Square,
+    Terminal,
+    Wifi,
+    WifiOff,
+    X,
+    XCircle,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+
+const logger = createLogger("titlebar");
 
 let appWindow: Window | null = null;
 function getAppWindow() {
@@ -39,7 +46,7 @@ const focusRing = "outline-none focus-visible:ring-[3px] focus-visible:ring-ring
 function getThemeClasses(inTerminal: boolean, isDark: boolean) {
   if (!inTerminal) {
     return {
-      tabActive: "bg-accent text-accent-foreground",
+      tabActive: "bg-primary/15 text-primary font-medium",
       tabInactive: "bg-muted/80 text-muted-foreground hover:bg-muted hover:text-foreground",
       iconBtn: "h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-accent",
       closeHover: "hover:bg-destructive hover:text-destructive-foreground",
@@ -72,26 +79,72 @@ function getThemeClasses(inTerminal: boolean, isDark: boolean) {
 
 interface TitleBarProps {
   onCloseTab: (tabId: string) => void;
+  onCloseOtherTabs: (keepTabId: string) => void;
+  onCloseAllTabs: () => void;
   terminalBg?: string;
   themeAccent?: string;
   themeVariant?: "dark" | "light";
 }
 
-export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: TitleBarProps) {
-  const { tabs, activeTabId, setActiveTab } = useSessionStore();
-  const { setSelectedHostId, setEditingHostId, setSettingsOpen } = useUiStore();
+export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, terminalBg, themeAccent, themeVariant }: TitleBarProps) {
+  const { tabs, activeTabId, setActiveTab, updateTab } = useSessionStore();
+  const { activeView, setActiveView, setSelectedHostId, setEditingHostId, setSettingsOpen } = useUiStore();
   const { terminalThemeId, setTerminalThemeId } = useSettingsStore();
 
+  const [tabMenuTarget, setTabMenuTarget] = useState<string | null>(null);
+  const { menu, menuRef, open, close } = useContextMenu();
+  const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
   const isHome = activeTabId === null;
+  const isSftp = isHome && activeView === "sftp";
   const inTerminal = !isHome && !!terminalBg;
   const isDarkTerminal = inTerminal && themeVariant !== "light";
   const styles = getThemeClasses(inTerminal, isDarkTerminal);
 
   const goHome = () => {
     useSessionStore.getState().setActiveTab(null);
+    setActiveView("home");
     setSelectedHostId(null);
     setEditingHostId(null);
   };
+
+  const goSftp = () => {
+    useSessionStore.getState().setActiveTab(null);
+    setActiveView("sftp");
+  };
+
+  useEffect(() => {
+    if (!menu) setTabMenuTarget(null);
+  }, [menu]);
+
+  const handleTabContextMenu = (e: React.MouseEvent, tabId: string) => {
+    setTabMenuTarget(tabId);
+    open(e);
+  };
+
+  const startRename = (tabId: string) => {
+    const tab = tabs.find((t) => t.id === tabId);
+    if (!tab) return;
+    setRenamingTabId(tabId);
+    setRenameValue(tab.title);
+    close();
+  };
+
+  const commitRename = () => {
+    if (renamingTabId && renameValue.trim()) {
+      updateTab(renamingTabId, { title: renameValue.trim() });
+    }
+    setRenamingTabId(null);
+  };
+
+  useEffect(() => {
+    if (renamingTabId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingTabId]);
 
   const lastClickRef = useRef(0);
 
@@ -104,7 +157,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
     const now = Date.now();
     if (now - lastClickRef.current < 300) {
       lastClickRef.current = 0;
-      getAppWindow().toggleMaximize().catch(console.error);
+      getAppWindow().toggleMaximize().catch((e) => logger.warn("toggleMaximize failed:", e));
     } else {
       lastClickRef.current = now;
       getAppWindow().startDragging();
@@ -147,12 +200,12 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
       </DropdownMenu>
 
       {/* Tabs area */}
-      <div className="flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto px-1 py-1">
-        {/* Hosts tab — always uses default shadcn colors */}
+      <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto px-1 py-1">
+        {/* Hosts tab */}
         <button
           className={cn(
             "group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors shrink-0",
-            isHome ? styles.tabActive : styles.tabInactive, focusRing
+            isHome && !isSftp ? styles.tabActive : styles.tabInactive, focusRing
           )}
           onClick={goHome}
         >
@@ -160,10 +213,22 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
           <span>Hosts</span>
         </button>
 
+        {/* SFTP tab */}
+        <button
+          className={cn(
+            "group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors shrink-0",
+            isSftp ? styles.tabActive : styles.tabInactive, focusRing
+          )}
+          onClick={goSftp}
+        >
+          <FolderOpen className="h-3 w-3 shrink-0" />
+          <span>SFTP</span>
+        </button>
+
         {/* Separator */}
         {tabs.length > 0 && (
           <div className={cn(
-            "mx-1 h-4 w-px shrink-0",
+            "h-4 w-px shrink-0",
             styles.separator
           )} />
         )}
@@ -172,12 +237,13 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const isProgressing = ["connecting", "authenticating"].includes(tab.status);
+          const isRenaming = renamingTabId === tab.id;
 
           return (
             <button
               key={tab.id}
               className={cn(
-                `group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors min-w-0 max-w-[180px] shrink-0 ${focusRing}`,
+                `group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors min-w-0 max-w-[180px] shrink-0 animate-in fade-in-0 slide-in-from-left-2 duration-150 ${focusRing}`,
                 isActive
                   ? (inTerminal ? styles.activeTabText : styles.tabActive)
                   : styles.tabInactive
@@ -186,6 +252,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
                 ? { backgroundColor: themeAccent + "59" }
                 : undefined}
               onClick={() => setActiveTab(tab.id)}
+              onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
             >
               {isProgressing ? (
                 <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
@@ -198,7 +265,23 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
               ) : (
                 <Terminal className="h-3 w-3 shrink-0" />
               )}
-              <span className="truncate">{tab.title}</span>
+              {isRenaming ? (
+                <input
+                  ref={renameInputRef}
+                  className="bg-transparent border-b border-current text-xs outline-none w-20 min-w-0"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onBlur={commitRename}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter") commitRename();
+                    if (e.key === "Escape") setRenamingTabId(null);
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <span className="truncate">{tab.title}</span>
+              )}
               <span
                 className={cn(
                   "shrink-0 rounded-sm p-0.5 opacity-0 group-hover:opacity-100",
@@ -215,6 +298,56 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
           );
         })}
       </div>
+
+      {/* Tab context menu */}
+      {menu && tabMenuTarget && (
+        <div
+          className="fixed inset-0 z-50"
+          onContextMenu={(e) => e.preventDefault()}
+          onMouseDown={close}
+        >
+          <div
+            ref={menuRef}
+            className="fixed min-w-[160px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+            style={{ left: menu.x, top: menu.y, visibility: "hidden", opacity: 0 }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              onClick={() => startRename(tabMenuTarget)}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              Rename
+            </button>
+            <div className="my-1 h-px bg-border" />
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              onClick={() => { onCloseTab(tabMenuTarget); close(); }}
+            >
+              <X className="h-3.5 w-3.5" />
+              Close
+            </button>
+            {tabs.length > 1 && (
+              <>
+                <button
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+                  onClick={() => { onCloseOtherTabs(tabMenuTarget); close(); }}
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  Close Others
+                </button>
+                <button
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+                  onClick={() => { onCloseAllTabs(); close(); }}
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  Close All
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Window controls */}
       <div className="flex items-center gap-0.5 shrink-0 mr-1">
@@ -253,7 +386,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
           type="button"
           aria-label="Minimize"
           className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn, focusRing)}
-          onClick={() => getAppWindow().minimize().catch(console.error)}
+          onClick={() => getAppWindow().minimize().catch((e) => logger.warn("minimize failed:", e))}
         >
           <Minus className="h-3.5 w-3.5" />
         </button>
@@ -261,7 +394,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
           type="button"
           aria-label="Maximize"
           className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn, focusRing)}
-          onClick={() => getAppWindow().toggleMaximize().catch(console.error)}
+          onClick={() => getAppWindow().toggleMaximize().catch((e) => logger.warn("toggleMaximize failed:", e))}
         >
           <Square className="h-3 w-3" />
         </button>
@@ -269,7 +402,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
           type="button"
           aria-label="Close"
           className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn, styles.closeHover, focusRing)}
-          onClick={() => getAppWindow().close().catch(console.error)}
+          onClick={() => getAppWindow().close().catch((e) => logger.warn("close failed:", e))}
         >
           <X className="h-3.5 w-3.5" />
         </button>

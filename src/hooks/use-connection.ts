@@ -1,8 +1,12 @@
-import { useCallback } from "react";
-import { useSessionStore } from "@/stores/session-store";
+import { createLogger } from "@/lib/logger";
+import { detectShells, localClose, localOpen, sshConnect, sshDisconnect } from "@/lib/tauri";
 import { useConnectionStore, type ConnectionInfo } from "@/stores/connection-store";
+import { useKeychainStore } from "@/stores/keychain-store";
+import { useSessionStore } from "@/stores/session-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { sshConnect, sshDisconnect, localOpen, localClose, detectShells } from "@/lib/tauri";
+import { useCallback } from "react";
+
+const logger = createLogger("connection");
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -19,16 +23,35 @@ export function useConnectionHandlers() {
 
       pushLog(`Connecting to ${conn.host}:${conn.port}...`);
       updateTab(tabId, { status: "connecting", error: null });
-      await delay(1000);
+      await delay(600);
 
       pushLog(`Authenticating as ${conn.username} (${conn.authType})...`);
       updateTab(tabId, { status: "authenticating" });
 
       try {
-        const authMethod =
-          conn.authType === "password"
-            ? { type: "password" as const, password }
-            : { type: "key" as const, key_path: conn.keyPath ?? "", passphrase: password || undefined };
+        let authMethod: { type: "password"; password: string } | { type: "key"; key_path: string; passphrase?: string } | { type: "key_content"; key_content: string; passphrase?: string };
+
+        if (conn.authType === "password") {
+          authMethod = { type: "password", password };
+        } else if (conn.keychainId) {
+          const keyItem = useKeychainStore.getState().items.find((k) => k.id === conn.keychainId);
+          if (keyItem) {
+            authMethod = {
+              type: "key_content",
+              key_content: keyItem.privateKey,
+              passphrase: password || keyItem.passphrase || undefined,
+            };
+          } else if (conn.keyPath) {
+            pushLog("Warning: Keychain key not found, falling back to key path.");
+            authMethod = { type: "key", key_path: conn.keyPath, passphrase: password || undefined };
+          } else {
+            pushLog("Error: Selected keychain key not found and no key path configured.");
+            updateTab(tabId, { status: "error", error: "Keychain key not found. Please re-select the key in host settings." });
+            return;
+          }
+        } else {
+          authMethod = { type: "key", key_path: conn.keyPath ?? "", passphrase: password || undefined };
+        }
 
         const result = await sshConnect({
           host: conn.host,
@@ -39,7 +62,7 @@ export function useConnectionHandlers() {
 
         pushLog("Session established.");
         updateTab(tabId, { status: "connected" });
-        await delay(800);
+        await delay(400);
         updateTab(tabId, { sessionId: result.session_id });
 
         if (conn.id && password) {
@@ -61,7 +84,7 @@ export function useConnectionHandlers() {
       const tabId = crypto.randomUUID();
       const hasCredentials =
         (conn.authType === "password" && conn.password) ||
-        (conn.authType === "key" && conn.keyPath);
+        (conn.authType === "key" && (conn.keychainId || conn.keyPath));
 
       const baseTitle = conn.name || conn.host;
       const currentTabs = useSessionStore.getState().tabs;
@@ -85,7 +108,8 @@ export function useConnectionHandlers() {
       });
 
       if (hasCredentials) {
-        doConnect(tabId, conn, conn.password ?? "");
+        const credentialPassword = conn.authType === "password" ? (conn.password ?? "") : (conn.keyPassphrase ?? "");
+        doConnect(tabId, conn, credentialPassword);
       }
     },
     [addTab, doConnect]
@@ -103,7 +127,7 @@ export function useConnectionHandlers() {
         doConnect(tabId, {
           id: tab.connectionId, name: tab.title, host: tab.host,
           port: tab.port, username: tab.username, authType: tab.authType, group: "",
-          password: "", keyPath: "", keyPassphrase: "",
+          password: "", keyPath: "", keyPassphrase: "", keychainId: "",
         }, password);
       }
     },
@@ -124,20 +148,43 @@ export function useConnectionHandlers() {
     []
   );
 
+  const disconnectTab = useCallback(async (tab: { sessionId: string | null; type: string; id: string }) => {
+    if (tab.sessionId) {
+      if (tab.type === "local") {
+        await localClose(tab.sessionId).catch((e) => logger.warn("localClose failed:", tab.id, e));
+      } else {
+        await sshDisconnect(tab.sessionId).catch((e) => logger.warn("sshDisconnect failed:", tab.id, e));
+      }
+    }
+  }, []);
+
   const handleCloseTab = useCallback(
     async (tabId: string) => {
       const { tabs: currentTabs } = useSessionStore.getState();
       const tab = currentTabs.find((t) => t.id === tabId);
-      if (tab?.sessionId) {
-        if (tab.type === "local") {
-          await localClose(tab.sessionId).catch(() => {});
-        } else {
-          await sshDisconnect(tab.sessionId).catch(() => {});
-        }
-      }
       removeTab(tabId);
+      if (tab) await disconnectTab(tab);
     },
-    [removeTab]
+    [removeTab, disconnectTab]
+  );
+
+  const handleCloseOtherTabs = useCallback(
+    async (keepTabId: string) => {
+      const { tabs: currentTabs, removeOtherTabs } = useSessionStore.getState();
+      const others = currentTabs.filter((t) => t.id !== keepTabId);
+      removeOtherTabs(keepTabId);
+      await Promise.all(others.map(disconnectTab));
+    },
+    [disconnectTab]
+  );
+
+  const handleCloseAllTabs = useCallback(
+    async () => {
+      const { tabs: currentTabs, removeAllTabs } = useSessionStore.getState();
+      removeAllTabs();
+      await Promise.all(currentTabs.map(disconnectTab));
+    },
+    [disconnectTab]
   );
 
   const handleOpenLocal = useCallback(async () => {
@@ -176,7 +223,7 @@ export function useConnectionHandlers() {
         authType: "password",
       });
     } catch (err) {
-      console.error("Failed to open local terminal:", err);
+      logger.error("Failed to open local terminal:", err);
     }
   }, [addTab]);
 
@@ -186,6 +233,8 @@ export function useConnectionHandlers() {
     handleRetry,
     handleDisconnect,
     handleCloseTab,
+    handleCloseOtherTabs,
+    handleCloseAllTabs,
     handleOpenLocal,
   };
 }

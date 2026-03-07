@@ -1,12 +1,23 @@
-import { create } from "zustand";
+import { createLogger } from "@/lib/logger";
 import {
-  getConnections,
-  saveConnection,
-  deleteConnection,
-  type ConnectionInfo,
+    deleteConnection,
+    getConnections,
+    saveConnection,
+    type ConnectionInfo,
 } from "@/lib/tauri";
+import { create } from "zustand";
 
 export type { ConnectionInfo } from "@/lib/tauri";
+
+const logger = createLogger("connection-store");
+
+function deriveGroups(connections: ConnectionInfo[]): string[] {
+  const set = new Set(["Default"]);
+  for (const c of connections) {
+    if (c.group) set.add(c.group);
+  }
+  return [...set];
+}
 
 interface ConnectionState {
   connections: ConnectionInfo[];
@@ -26,44 +37,49 @@ export const useConnectionStore = create<ConnectionState>()((set, get) => ({
   loadConnections: async () => {
     try {
       const connections = await getConnections();
-      set({ connections, loaded: true });
+      set({ connections, groups: deriveGroups(connections), loaded: true });
     } catch (e) {
-      console.warn("Failed to load connections from backend:", e);
+      logger.warn("Failed to load connections:", e);
       set({ loaded: true });
     }
   },
 
   addConnection: async (conn) => {
-    set((state) => ({ connections: [...state.connections, conn] }));
+    const prev = get().connections;
+    const next = [...prev, conn];
+    set({ connections: next, groups: deriveGroups(next) });
     try {
       await saveConnection(conn);
     } catch (e) {
-      console.warn("Failed to save connection:", e);
+      logger.warn("Failed to save connection, rolling back:", e);
+      set({ connections: prev, groups: deriveGroups(prev) });
     }
   },
 
   updateConnection: async (id, partial) => {
-    const existing = get().connections.find((c) => c.id === id);
+    const prev = get().connections;
+    const existing = prev.find((c) => c.id === id);
     if (!existing) return;
     const updated = { ...existing, ...partial };
-    set((state) => ({
-      connections: state.connections.map((c) => (c.id === id ? updated : c)),
-    }));
+    const next = prev.map((c) => (c.id === id ? updated : c));
+    set({ connections: next, groups: deriveGroups(next) });
     try {
       await saveConnection(updated);
     } catch (e) {
-      console.warn("Failed to update connection:", e);
+      logger.warn("Failed to update connection, rolling back:", e);
+      set({ connections: prev, groups: deriveGroups(prev) });
     }
   },
 
   removeConnection: async (id) => {
-    set((state) => ({
-      connections: state.connections.filter((c) => c.id !== id),
-    }));
+    const prev = get().connections;
+    const next = prev.filter((c) => c.id !== id);
+    set({ connections: next, groups: deriveGroups(next) });
     try {
       await deleteConnection(id);
     } catch (e) {
-      console.warn("Failed to delete connection:", e);
+      logger.warn("Failed to delete connection, rolling back:", e);
+      set({ connections: prev, groups: deriveGroups(prev) });
     }
   },
 }));

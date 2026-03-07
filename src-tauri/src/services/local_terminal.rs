@@ -89,6 +89,8 @@ impl LocalTerminalManager {
             .await
             .insert(session_id.clone(), session);
 
+        log::info!("Local terminal spawned: session={}, shell={}", session_id, shell_path);
+
         let sid = session_id.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(200));
@@ -157,7 +159,9 @@ impl LocalTerminalManager {
     pub async fn close(&self, session_id: &str) -> Result<()> {
         let mut sessions = self.sessions.lock().await;
         if let Some(mut session) = sessions.remove(session_id) {
-            let _ = session.child.kill();
+            if let Err(e) = session.child.kill() {
+                log::warn!("Failed to kill local terminal process {}: {}", session_id, e);
+            }
         }
         Ok(())
     }

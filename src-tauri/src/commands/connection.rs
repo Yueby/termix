@@ -19,6 +19,8 @@ pub struct ConnectionInfo {
     pub key_path: String,
     #[serde(default)]
     pub key_passphrase: String,
+    #[serde(default)]
+    pub keychain_id: String,
 }
 
 #[tauri::command]

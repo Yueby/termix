@@ -4,6 +4,7 @@ use sqlx::{Pool, Sqlite};
 use std::str::FromStr;
 
 use crate::commands::connection::ConnectionInfo;
+use crate::commands::keychain::KeychainItem;
 use crate::commands::settings::AppSettings;
 use crate::commands::snippet::Snippet;
 use crate::services::crypto;
@@ -101,15 +102,28 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // Upgrade existing connections table — safe to call repeatedly (errors ignored)
-        for col in ["encrypted_password", "encrypted_key_path", "encrypted_key_passphrase"] {
-            let _ = sqlx::query(&format!(
-                "ALTER TABLE connections ADD COLUMN {} TEXT DEFAULT ''",
-                col
-            ))
-            .execute(&self.pool)
-            .await;
-        }
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS keychain (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                key_type TEXT NOT NULL DEFAULT 'ssh-key',
+                encrypted_private_key TEXT NOT NULL DEFAULT '',
+                encrypted_passphrase TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_password TEXT DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_path TEXT DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_passphrase TEXT DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN keychain_id TEXT DEFAULT ''")
+            .execute(&self.pool).await;
 
         Ok(())
     }
@@ -152,7 +166,10 @@ impl Database {
         let snippets = rows
             .into_iter()
             .map(|(id, name, content, tags)| {
-                let tags: Vec<String> = serde_json::from_str(&tags).unwrap_or_default();
+                let tags: Vec<String> = serde_json::from_str(&tags).unwrap_or_else(|e| {
+                    log::warn!("Failed to parse tags JSON for snippet {}: {}", id, e);
+                    Vec::new()
+                });
                 Snippet { id, name, content, tags }
             })
             .collect();
@@ -201,17 +218,30 @@ impl Database {
     // ── Connections ──
 
     pub async fn get_connections(&self) -> Result<Vec<ConnectionInfo>> {
-        let rows: Vec<(String, String, String, i32, String, String, String, String, String, String)> =
+        let rows: Vec<(String, String, String, i32, String, String, String, String, String, String, String)> =
             sqlx::query_as(
                 "SELECT id, name, host, port, username, auth_type, group_name,
-                        encrypted_password, encrypted_key_path, encrypted_key_passphrase
+                        encrypted_password, encrypted_key_path, encrypted_key_passphrase,
+                        COALESCE(keychain_id, '') as keychain_id
                  FROM connections ORDER BY name",
             )
             .fetch_all(&self.pool)
             .await?;
 
         let mut conns = Vec::with_capacity(rows.len());
-        for (id, name, host, port, username, auth_type, group, enc_pw, enc_kp, enc_kpp) in rows {
+        for (id, name, host, port, username, auth_type, group, enc_pw, enc_kp, enc_kpp, keychain_id) in rows {
+            let password = crypto::decrypt(&enc_pw).unwrap_or_else(|e| {
+                log::warn!("Failed to decrypt password for connection {}: {}", id, e);
+                String::new()
+            });
+            let key_path = crypto::decrypt(&enc_kp).unwrap_or_else(|e| {
+                log::warn!("Failed to decrypt key_path for connection {}: {}", id, e);
+                String::new()
+            });
+            let key_passphrase = crypto::decrypt(&enc_kpp).unwrap_or_else(|e| {
+                log::warn!("Failed to decrypt key_passphrase for connection {}: {}", id, e);
+                String::new()
+            });
             conns.push(ConnectionInfo {
                 id,
                 name,
@@ -220,9 +250,10 @@ impl Database {
                 username,
                 auth_type,
                 group,
-                password: crypto::decrypt(&enc_pw).unwrap_or_default(),
-                key_path: crypto::decrypt(&enc_kp).unwrap_or_default(),
-                key_passphrase: crypto::decrypt(&enc_kpp).unwrap_or_default(),
+                password,
+                key_path,
+                key_passphrase,
+                keychain_id,
             });
         }
         Ok(conns)
@@ -236,20 +267,20 @@ impl Database {
 
         sqlx::query(
             "INSERT INTO connections (id, name, host, port, username, auth_type, group_name,
-                encrypted_password, encrypted_key_path, encrypted_key_passphrase, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                encrypted_password, encrypted_key_path, encrypted_key_passphrase, keychain_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 name=?, host=?, port=?, username=?, auth_type=?, group_name=?,
-                encrypted_password=?, encrypted_key_path=?, encrypted_key_passphrase=?, updated_at=?",
+                encrypted_password=?, encrypted_key_path=?, encrypted_key_passphrase=?, keychain_id=?, updated_at=?",
         )
         .bind(&conn.id).bind(&conn.name).bind(&conn.host).bind(conn.port)
         .bind(&conn.username).bind(&conn.auth_type).bind(&conn.group)
-        .bind(&enc_pw).bind(&enc_kp).bind(&enc_kpp)
+        .bind(&enc_pw).bind(&enc_kp).bind(&enc_kpp).bind(&conn.keychain_id)
         .bind(now).bind(now)
         // ON CONFLICT SET
         .bind(&conn.name).bind(&conn.host).bind(conn.port)
         .bind(&conn.username).bind(&conn.auth_type).bind(&conn.group)
-        .bind(&enc_pw).bind(&enc_kp).bind(&enc_kpp)
+        .bind(&enc_pw).bind(&enc_kp).bind(&enc_kpp).bind(&conn.keychain_id)
         .bind(now)
         .execute(&self.pool)
         .await?;
@@ -270,6 +301,77 @@ impl Database {
         Ok(())
     }
 
+    // ── Keychain ──
+
+    pub async fn get_keychain_items(&self) -> Result<Vec<KeychainItem>> {
+        let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+            "SELECT id, name, key_type, encrypted_private_key, encrypted_passphrase FROM keychain ORDER BY name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut items = Vec::with_capacity(rows.len());
+        for (id, name, key_type, enc_pk, enc_pp) in rows {
+            let private_key = crypto::decrypt(&enc_pk).unwrap_or_else(|e| {
+                log::warn!("Failed to decrypt private_key for keychain {}: {}", id, e);
+                String::new()
+            });
+            let passphrase = crypto::decrypt(&enc_pp).unwrap_or_else(|e| {
+                log::warn!("Failed to decrypt passphrase for keychain {}: {}", id, e);
+                String::new()
+            });
+            items.push(KeychainItem {
+                id,
+                name,
+                key_type,
+                private_key,
+                passphrase,
+            });
+        }
+        Ok(items)
+    }
+
+    pub async fn save_keychain_item(&self, item: &KeychainItem) -> Result<()> {
+        let now = now_epoch();
+        let enc_pk = crypto::encrypt(&item.private_key)?;
+        let enc_pp = crypto::encrypt(&item.passphrase)?;
+
+        sqlx::query(
+            "INSERT INTO keychain (id, name, key_type, encrypted_private_key, encrypted_passphrase, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name=?, key_type=?, encrypted_private_key=?, encrypted_passphrase=?, updated_at=?",
+        )
+        .bind(&item.id).bind(&item.name).bind(&item.key_type)
+        .bind(&enc_pk).bind(&enc_pp)
+        .bind(now).bind(now)
+        .bind(&item.name).bind(&item.key_type)
+        .bind(&enc_pk).bind(&enc_pp)
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+
+        self.touch_sync("keychain", &item.id).await?;
+        Ok(())
+    }
+
+    pub async fn delete_keychain_item(&self, id: &str) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE connections SET keychain_id = '' WHERE keychain_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM keychain WHERE id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM sync_metadata WHERE table_name = 'keychain' AND record_id = ?")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     // ── Sync metadata ──
 
     async fn touch_sync(&self, table: &str, record_id: &str) -> Result<()> {
@@ -286,6 +388,7 @@ impl Database {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get_unsynced(&self, table: &str) -> Result<Vec<(String, i64)>> {
         let rows: Vec<(String, i64)> = sqlx::query_as(
             "SELECT record_id, updated_at FROM sync_metadata
@@ -297,6 +400,7 @@ impl Database {
         Ok(rows)
     }
 
+    #[allow(dead_code)]
     pub async fn mark_synced(&self, table: &str, record_id: &str) -> Result<()> {
         let now = now_epoch();
         sqlx::query(

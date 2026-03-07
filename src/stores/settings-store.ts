@@ -1,12 +1,15 @@
-import { create } from "zustand";
-import { getThemeById } from "@/lib/terminal-themes";
+import { createLogger } from "@/lib/logger";
 import {
-  getSettings,
-  saveSettings as saveSettingsApi,
-  type AppSettings,
+    getSettings,
+    saveSettings as saveSettingsApi,
+    type AppSettings,
 } from "@/lib/tauri";
+import { getThemeById } from "@/lib/terminal-themes";
+import { create } from "zustand";
 
 export type { AppSettings } from "@/lib/tauri";
+
+const logger = createLogger("settings-store");
 
 interface SettingsState {
   theme: "dark" | "light";
@@ -21,6 +24,7 @@ interface SettingsState {
   webdavUsername: string;
   webdavPassword: string;
   webdavRemoteDir: string;
+  syncEncryptionPassword: string;
 
   loaded: boolean;
   loadSettings: () => Promise<void>;
@@ -35,13 +39,15 @@ interface SettingsState {
   setWebdavUsername: (username: string) => void;
   setWebdavPassword: (password: string) => void;
   setWebdavRemoteDir: (dir: string) => void;
+  setSyncEncryptionPassword: (password: string) => void;
 }
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
-function persistToBackend(state: SettingsState) {
+function persistToBackend(getState: () => SettingsState) {
   if (persistTimer) clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
+    const state = getState();
     const settings: AppSettings = {
       theme: state.theme,
       fontFamily: state.fontFamily,
@@ -54,16 +60,28 @@ function persistToBackend(state: SettingsState) {
       webdavUsername: state.webdavUsername,
       webdavPassword: state.webdavPassword,
       webdavRemoteDir: state.webdavRemoteDir,
+      syncEncryptionPassword: state.syncEncryptionPassword,
     };
     saveSettingsApi(settings).catch((e) =>
-      console.warn("Failed to persist settings:", e)
+      logger.warn("Failed to persist settings:", e)
     );
   }, 500);
 }
 
+const DEFAULT_FONT_FAMILY = "monospace";
+
+const LEGACY_FONT_FAMILIES = new Set([
+  "Consolas, Menlo, Monaco, Courier New, monospace",
+]);
+
+function migrateFontFamily(stored: string): string {
+  if (!stored || LEGACY_FONT_FAMILIES.has(stored)) return DEFAULT_FONT_FAMILY;
+  return stored;
+}
+
 export const useSettingsStore = create<SettingsState>()((set, get) => ({
   theme: "dark",
-  fontFamily: "JetBrainsMono NF, JetBrains Mono, Consolas, monospace",
+  fontFamily: DEFAULT_FONT_FAMILY,
   fontSize: 14,
   cursorStyle: "block",
   scrollBack: 10000,
@@ -73,6 +91,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   webdavUsername: "",
   webdavPassword: "",
   webdavRemoteDir: "/termix",
+  syncEncryptionPassword: "",
   loaded: false,
 
   loadSettings: async () => {
@@ -82,7 +101,7 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
       document.documentElement.classList.toggle("dark", theme === "dark");
       set({
         theme,
-        fontFamily: s.fontFamily || "JetBrainsMono NF, JetBrains Mono, Consolas, monospace",
+        fontFamily: migrateFontFamily(s.fontFamily),
         fontSize: s.fontSize || 14,
         cursorStyle: (s.cursorStyle as "block" | "underline" | "bar") || "block",
         scrollBack: s.scrollBack || 10000,
@@ -92,10 +111,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         webdavUsername: s.webdavUsername || "",
         webdavPassword: s.webdavPassword || "",
         webdavRemoteDir: s.webdavRemoteDir || "/termix",
+        syncEncryptionPassword: s.syncEncryptionPassword || "",
         loaded: true,
       });
     } catch (e) {
-      console.warn("Failed to load settings from backend:", e);
+      logger.warn("Failed to load settings:", e);
       document.documentElement.classList.add("dark");
       set({ loaded: true });
     }
@@ -110,47 +130,51 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     } else {
       set({ theme });
     }
-    persistToBackend(get());
+    persistToBackend(get);
   },
 
   setFontFamily: (fontFamily) => {
     set({ fontFamily });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setFontSize: (fontSize) => {
     set({ fontSize });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setCursorStyle: (cursorStyle) => {
     set({ cursorStyle });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setScrollBack: (scrollBack) => {
     set({ scrollBack });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setTerminalThemeId: (id) => {
     set({ terminalThemeId: id });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setDefaultShell: (shell) => {
     set({ defaultShell: shell });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setWebdavUrl: (url) => {
     set({ webdavUrl: url });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setWebdavUsername: (username) => {
     set({ webdavUsername: username });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setWebdavPassword: (password) => {
     set({ webdavPassword: password });
-    persistToBackend(get());
+    persistToBackend(get);
   },
   setWebdavRemoteDir: (dir) => {
     set({ webdavRemoteDir: dir });
-    persistToBackend(get());
+    persistToBackend(get);
+  },
+  setSyncEncryptionPassword: (password) => {
+    set({ syncEncryptionPassword: password });
+    persistToBackend(get);
   },
 }));

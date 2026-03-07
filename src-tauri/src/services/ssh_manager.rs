@@ -9,7 +9,6 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 
-use crate::commands::sftp::FileEntry;
 use crate::commands::ssh::AuthMethod;
 
 #[derive(Clone, Serialize)]
@@ -34,8 +33,14 @@ impl client::Handler for ClientHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &PublicKey,
+        server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
+        // TODO: Implement known_hosts verification to prevent MITM attacks.
+        // Currently accepts all host keys — acceptable for early development only.
+        log::warn!(
+            "Host key verification skipped. Fingerprint: {:?}",
+            server_public_key.fingerprint()
+        );
         Ok(true)
     }
 
@@ -63,7 +68,7 @@ impl client::Handler for ClientHandler {
 
 struct Session {
     handle: client::Handle<ClientHandler>,
-    channel: Channel<client::Msg>,
+    channel: Arc<Channel<client::Msg>>,
 }
 
 pub struct SshManager {
@@ -109,9 +114,22 @@ impl SshManager {
                     .authenticate_publickey(username, Arc::new(key))
                     .await?
             }
+            AuthMethod::PrivateKeyContent {
+                key_content,
+                passphrase,
+            } => {
+                if key_content.trim().is_empty() {
+                    return Err(anyhow!("Private key content is empty"));
+                }
+                let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref())?;
+                handle
+                    .authenticate_publickey(username, Arc::new(key))
+                    .await?
+            }
         };
 
         if !authenticated {
+            log::warn!("SSH authentication failed for {}@{}:{}", username, host, port);
             return Err(anyhow!("Authentication failed"));
         }
 
@@ -122,7 +140,7 @@ impl SshManager {
             .await?;
         channel.request_shell(false).await?;
 
-        let session = Session { handle, channel };
+        let session = Session { handle, channel: Arc::new(channel) };
         self.sessions
             .lock()
             .await
@@ -150,6 +168,7 @@ impl SshManager {
             );
         });
 
+        log::info!("SSH session {} connected to {}:{}", session_id, host, port);
         Ok(session_id)
     }
 
@@ -160,17 +179,20 @@ impl SshManager {
                 .handle
                 .disconnect(Disconnect::ByApplication, "User disconnected", "en")
                 .await?;
+            log::info!("SSH session {} disconnected", session_id);
         }
         Ok(())
     }
 
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<()> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow!("Session not found: {}", session_id))?;
-        session
-            .channel
+        let channel = {
+            let sessions = self.sessions.lock().await;
+            sessions
+                .get(session_id)
+                .map(|s| s.channel.clone())
+                .ok_or_else(|| anyhow!("Session not found: {}", session_id))?
+        };
+        channel
             .data(&data[..])
             .await
             .map_err(|e| anyhow!("Failed to write: {:?}", e))?;
@@ -178,12 +200,14 @@ impl SshManager {
     }
 
     pub async fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<()> {
-        let sessions = self.sessions.lock().await;
-        let session = sessions
-            .get(session_id)
-            .ok_or_else(|| anyhow!("Session not found: {}", session_id))?;
-        session
-            .channel
+        let channel = {
+            let sessions = self.sessions.lock().await;
+            sessions
+                .get(session_id)
+                .map(|s| s.channel.clone())
+                .ok_or_else(|| anyhow!("Session not found: {}", session_id))?
+        };
+        channel
             .window_change(cols, rows, 0, 0)
             .await
             .map_err(|e| anyhow!("Failed to resize: {:?}", e))?;
@@ -192,35 +216,5 @@ impl SshManager {
 
     pub async fn list_sessions(&self) -> Vec<String> {
         self.sessions.lock().await.keys().cloned().collect()
-    }
-
-    pub async fn sftp_list_dir(&self, _session_id: &str, _path: &str) -> Result<Vec<FileEntry>> {
-        Ok(vec![])
-    }
-
-    pub async fn sftp_download(
-        &self,
-        _session_id: &str,
-        _remote_path: &str,
-        _local_path: &str,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    pub async fn sftp_upload(
-        &self,
-        _session_id: &str,
-        _local_path: &str,
-        _remote_path: &str,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    pub async fn sftp_mkdir(&self, _session_id: &str, _path: &str) -> Result<()> {
-        Ok(())
-    }
-
-    pub async fn sftp_remove(&self, _session_id: &str, _path: &str) -> Result<()> {
-        Ok(())
     }
 }

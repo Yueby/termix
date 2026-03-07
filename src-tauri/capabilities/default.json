@@ -13,6 +13,10 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-unmaximize",
     "core:window:allow-close",
-    "core:window:allow-set-focus"
+    "core:window:allow-set-focus",
+    "dialog:default",
+    "log:default",
+    "clipboard-manager:default",
+    "clipboard-manager:allow-read-text"
   ]
 }
