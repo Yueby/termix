@@ -21,6 +21,11 @@ pub enum AuthMethod {
         key_path: String,
         passphrase: Option<String>,
     },
+    #[serde(rename = "key_content")]
+    PrivateKeyContent {
+        key_content: String,
+        passphrase: Option<String>,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -43,7 +48,10 @@ pub async fn ssh_connect(
             payload.auth_method,
         )
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| {
+            log::error!("ssh_connect failed for {}:{}: {}", payload.host, payload.port, e);
+            e.to_string()
+        })?;
 
     Ok(ConnectResult { session_id })
 }
@@ -56,7 +64,10 @@ pub async fn ssh_disconnect(
     ssh_manager
         .disconnect(&session_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| {
+            log::warn!("ssh_disconnect failed for session {}: {}", session_id, e);
+            e.to_string()
+        })
 }
 
 #[tauri::command]

@@ -28,6 +28,8 @@ interface SessionState {
   activeTabId: string | null;
   addTab: (tab: SessionTab) => void;
   removeTab: (id: string) => void;
+  removeOtherTabs: (id: string) => void;
+  removeAllTabs: () => void;
   setActiveTab: (id: string | null) => void;
   updateTab: (id: string, partial: Partial<SessionTab>) => void;
 }
@@ -51,6 +53,14 @@ export const useSessionStore = create<SessionState>()((set) => ({
           : state.activeTabId;
       return { tabs: remaining, activeTabId: newActive };
     }),
+
+  removeOtherTabs: (id) =>
+    set((state) => ({
+      tabs: state.tabs.filter((t) => t.id === id),
+      activeTabId: id,
+    })),
+
+  removeAllTabs: () => set({ tabs: [], activeTabId: null }),
 
   setActiveTab: (id) => set({ activeTabId: id }),
 

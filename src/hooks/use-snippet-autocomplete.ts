@@ -1,5 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { createLogger } from "@/lib/logger";
 import { useSnippetStore, type Snippet } from "@/stores/snippet-store";
+import { useCallback, useRef, useState } from "react";
+
+const logger = createLogger("snippet-autocomplete");
 
 export function useSnippetAutocomplete(
   sessionId: string | null,
@@ -40,7 +43,7 @@ export function useSnippetAutocomplete(
     const encoder = new TextEncoder();
     const backBytes = Array.from(backspaces);
     const contentBytes = Array.from(encoder.encode(snippet.content));
-    writeToSession(sessionId, [...backBytes, ...contentBytes]).catch(console.warn);
+    writeToSession(sessionId, [...backBytes, ...contentBytes]).catch((e) => logger.warn("writeToSession failed:", e));
     inputBufferRef.current = "";
     setSuggestions([]);
     setAutocompleteVisible(false);

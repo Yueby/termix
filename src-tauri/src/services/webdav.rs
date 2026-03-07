@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use reqwest::Client;
+use std::time::Duration;
 
 pub struct WebDavClient {
     base_url: String,
@@ -14,7 +15,11 @@ impl WebDavClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             username: username.to_string(),
             password: password.to_string(),
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(30))
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
         }
     }
 
@@ -25,7 +30,7 @@ impl WebDavClient {
     pub async fn propfind(&self, path: &str) -> Result<String> {
         let resp = self
             .client
-            .request(reqwest::Method::from_bytes(b"PROPFIND").unwrap(), self.url(path))
+            .request(reqwest::Method::from_bytes(b"PROPFIND").expect("PROPFIND is a valid HTTP method"), self.url(path))
             .basic_auth(&self.username, Some(&self.password))
             .header("Depth", "1")
             .send()
@@ -77,7 +82,7 @@ impl WebDavClient {
     pub async fn mkcol(&self, path: &str) -> Result<()> {
         let resp = self
             .client
-            .request(reqwest::Method::from_bytes(b"MKCOL").unwrap(), self.url(path))
+            .request(reqwest::Method::from_bytes(b"MKCOL").expect("MKCOL is a valid HTTP method"), self.url(path))
             .basic_auth(&self.username, Some(&self.password))
             .send()
             .await

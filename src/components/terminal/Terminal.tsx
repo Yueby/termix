@@ -1,16 +1,23 @@
+import { useContextMenu } from "@/hooks/use-context-menu";
+import { useSnippetAutocomplete } from "@/hooks/use-snippet-autocomplete";
+import { createLogger } from "@/lib/logger";
 import { localResize, localWrite, sshResize, sshWrite } from "@/lib/tauri";
 import { getThemeById } from "@/lib/terminal-themes";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useSnippetAutocomplete } from "@/hooks/use-snippet-autocomplete";
+import { useSnippetStore } from "@/stores/snippet-store";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { readText as clipboardRead, writeText as clipboardWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { FitAddon } from "@xterm/addon-fit";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { ClipboardPaste, Copy, Eraser, Plus, TextSelect } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SnippetAutocomplete } from "./SnippetAutocomplete";
+
+const logger = createLogger("terminal");
 
 interface SshDataEvent {
   session_id: string;
@@ -95,13 +102,12 @@ export function TerminalView({
     const timer = window.setTimeout(() => {
       fitAddonRef.current?.fit();
       if (sessionId && xtermRef.current) {
-        resizeSession(sessionId, xtermRef.current.cols, xtermRef.current.rows).catch(console.warn);
+        resizeSession(sessionId, xtermRef.current.cols, xtermRef.current.rows).catch((e) => logger.warn("resize failed:", e));
       }
     }, 150);
     return () => clearTimeout(timer);
   }, [isActive, sessionId, resizeSession]);
 
-  // Update font settings without destroying the terminal
   useEffect(() => {
     if (xtermRef.current) {
       xtermRef.current.options.fontSize = fontSize;
@@ -179,11 +185,11 @@ export function TerminalView({
         const encoder = new TextEncoder();
         const bytes = Array.from(encoder.encode(data));
         handleTerminalData(data);
-        writeToSession(sessionId, bytes).catch(console.warn);
+        writeToSession(sessionId, bytes).catch((e) => logger.warn("write failed:", e));
       });
 
       if (isActiveRef.current) {
-        resizeSession(sessionId, xterm.cols, xterm.rows).catch(console.warn);
+        resizeSession(sessionId, xterm.cols, xterm.rows).catch((e) => logger.warn("resize failed:", e));
       }
     } else {
       xterm.writeln("\x1b[1;36m  Welcome to Termix\x1b[0m");
@@ -230,7 +236,7 @@ export function TerminalView({
         if (!isActiveRef.current) return;
         fitAddon.fit();
         if (sessionId) {
-          resizeSession(sessionId, xterm.cols, xterm.rows).catch(console.warn);
+          resizeSession(sessionId, xterm.cols, xterm.rows).catch((e) => logger.warn("resize failed:", e));
         }
       }, 100);
     });
@@ -240,7 +246,9 @@ export function TerminalView({
       disposed = true;
       clearTimeout(resizeTimer);
       resizeObserver.disconnect();
-      unlistenPromises.forEach((p) => p.then((unlisten) => unlisten()));
+      Promise.all(unlistenPromises).then((fns) => {
+        fns.forEach((fn) => fn());
+      });
       xterm.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
@@ -278,11 +286,88 @@ export function TerminalView({
 
   const theme = getThemeById(themeId);
 
+  const { menu: termMenu, menuRef: termMenuRef, open: openTermMenu, close: closeTermMenu } = useContextMenu();
+
+
+  const focusTerminal = useCallback(() => {
+    xtermRef.current?.focus();
+  }, []);
+
+  const handleCopy = useCallback(() => {
+    const sel = xtermRef.current?.getSelection();
+    if (sel) clipboardWrite(sel).catch((e) => logger.warn("copy failed:", e));
+    closeTermMenu();
+    requestAnimationFrame(focusTerminal);
+  }, [focusTerminal]);
+
+  const handlePaste = useCallback(() => {
+    clipboardRead().then((text) => {
+      if (text && xtermRef.current) {
+        xtermRef.current.paste(text);
+        xtermRef.current.clearSelection();
+        xtermRef.current.scrollToBottom();
+        xtermRef.current.focus();
+      }
+    }).catch((e) => logger.warn("paste failed:", e));
+    closeTermMenu();
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    xtermRef.current?.selectAll();
+    closeTermMenu();
+    requestAnimationFrame(focusTerminal);
+  }, [focusTerminal]);
+
+  const [snippetDialog, setSnippetDialog] = useState<{ content: string } | null>(null);
+  const [snippetName, setSnippetName] = useState("");
+  const snippetNameRef = useRef<HTMLInputElement>(null);
+
+  const handleAddToSnippets = useCallback(() => {
+    const sel = xtermRef.current?.getSelection();
+    if (sel?.trim()) {
+      setSnippetDialog({ content: sel.trim() });
+      setSnippetName("");
+    }
+    closeTermMenu();
+  }, []);
+
+  const handleSaveSnippet = useCallback(() => {
+    if (!snippetDialog) return;
+    const id = crypto.randomUUID();
+    useSnippetStore.getState().addSnippet({
+      id,
+      name: snippetName.trim() || "Untitled",
+      content: snippetDialog.content,
+      tags: [],
+    });
+    setSnippetDialog(null);
+  }, [snippetDialog, snippetName]);
+
+  useEffect(() => {
+    if (snippetDialog && snippetNameRef.current) {
+      snippetNameRef.current.focus();
+    }
+  }, [snippetDialog]);
+
+  const handleClearTerminal = useCallback(() => {
+    xtermRef.current?.clear();
+    closeTermMenu();
+    requestAnimationFrame(focusTerminal);
+  }, [focusTerminal]);
+
+  const [hasSelection, setHasSelection] = useState(false);
+
+  const handleTermContextMenuWrapped = useCallback((e: React.MouseEvent) => {
+    setHasSelection(!!xtermRef.current?.getSelection());
+    openTermMenu(e);
+  }, [openTermMenu]);
+
   return (
     <div
       className="relative h-full w-full"
       style={{ backgroundColor: theme.colors.background }}
       onKeyDown={handleKeyDown}
+      onContextMenu={handleTermContextMenuWrapped}
     >
       <div className="h-full w-full pt-0.5 pb-2.5 pl-2.5 pr-1.5">
         <div ref={termRef} className="h-full w-full" />
@@ -297,6 +382,102 @@ export function TerminalView({
             containerWidth={containerSize.width}
             containerHeight={containerSize.height}
           />
+        </div>
+      )}
+
+      {/* Add to Snippets dialog */}
+      {snippetDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[400px] rounded-lg border bg-popover p-4 shadow-lg text-popover-foreground animate-in fade-in-0 zoom-in-95 duration-150">
+            <h3 className="text-sm font-medium mb-3">Add to Snippets</h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Name</label>
+                <input
+                  ref={snippetNameRef}
+                  className="w-full rounded-md border bg-background px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-ring"
+                  placeholder="Snippet name..."
+                  value={snippetName}
+                  onChange={(e) => setSnippetName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveSnippet();
+                    if (e.key === "Escape") setSnippetDialog(null);
+                  }}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Content</label>
+                <pre className="max-h-32 overflow-auto rounded-md border bg-muted/50 p-2 text-xs whitespace-pre-wrap break-all">
+                  {snippetDialog.content}
+                </pre>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  className="rounded-md px-3 py-1.5 text-xs border hover:bg-accent transition-colors"
+                  onClick={() => setSnippetDialog(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-md px-3 py-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  onClick={handleSaveSnippet}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Terminal content context menu */}
+      {termMenu && (
+        <div className="fixed inset-0 z-50">
+          <div
+            ref={termMenuRef}
+            className="absolute min-w-[170px] rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+            style={{ visibility: "hidden" }}
+          >
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none disabled:opacity-50 disabled:pointer-events-none"
+              disabled={!hasSelection}
+              onClick={handleCopy}
+            >
+              <Copy className="h-3.5 w-3.5" />
+              Copy
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              onClick={handlePaste}
+            >
+              <ClipboardPaste className="h-3.5 w-3.5" />
+              Paste
+            </button>
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              onClick={handleSelectAll}
+            >
+              <TextSelect className="h-3.5 w-3.5" />
+              Select All
+            </button>
+            <div className="my-1 h-px bg-border" />
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none disabled:opacity-50 disabled:pointer-events-none"
+              disabled={!hasSelection}
+              onClick={handleAddToSnippets}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add to Snippets
+            </button>
+            <div className="my-1 h-px bg-border" />
+            <button
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              onClick={handleClearTerminal}
+            >
+              <Eraser className="h-3.5 w-3.5" />
+              Clear Terminal
+            </button>
+          </div>
         </div>
       )}
     </div>

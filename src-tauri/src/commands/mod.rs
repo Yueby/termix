@@ -1,7 +1,9 @@
 pub mod ssh;
 pub mod sftp;
+pub mod local_fs;
 pub mod local_terminal;
 pub mod connection;
+pub mod keychain;
 pub mod settings;
 pub mod snippet;
 pub mod sync;
