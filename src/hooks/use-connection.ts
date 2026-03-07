@@ -81,7 +81,7 @@ export function useConnectionHandlers() {
         host: conn.host,
         port: conn.port,
         username: conn.username,
-        authType: conn.authType,
+        authType: conn.authType as "password" | "key",
       });
 
       if (hasCredentials) {
@@ -103,6 +103,7 @@ export function useConnectionHandlers() {
         doConnect(tabId, {
           id: tab.connectionId, name: tab.title, host: tab.host,
           port: tab.port, username: tab.username, authType: tab.authType, group: "",
+          password: "", keyPath: "", keyPassphrase: "",
         }, password);
       }
     },

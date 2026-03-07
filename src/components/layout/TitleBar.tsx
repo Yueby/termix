@@ -34,6 +34,8 @@ function getAppWindow() {
   return appWindow;
 }
 
+const focusRing = "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+
 function getThemeClasses(inTerminal: boolean, isDark: boolean) {
   if (!inTerminal) {
     return {
@@ -112,7 +114,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
   return (
     <div
       className={cn(
-        "flex h-11 shrink-0 items-center select-none",
+        "flex h-12 shrink-0 items-center select-none",
         !inTerminal && "border-b bg-background"
       )}
       style={inTerminal ? { backgroundColor: terminalBg } : undefined}
@@ -125,7 +127,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
             type="button"
             className={cn(
               "inline-flex items-center justify-center rounded-md mx-1.5 shrink-0 transition-colors",
-              styles.iconBtn
+              styles.iconBtn, focusRing
             )}
           >
             <Menu className="h-4 w-4" />
@@ -145,12 +147,12 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
       </DropdownMenu>
 
       {/* Tabs area */}
-      <div className="flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto px-1">
+      <div className="flex items-center gap-0.5 flex-1 min-w-0 overflow-x-auto px-1 py-1">
         {/* Hosts tab — always uses default shadcn colors */}
         <button
           className={cn(
-            "group flex items-center gap-1.5 rounded-md px-3 py-1 text-xs transition-colors shrink-0",
-            isHome ? styles.tabActive : styles.tabInactive
+            "group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors shrink-0",
+            isHome ? styles.tabActive : styles.tabInactive, focusRing
           )}
           onClick={goHome}
         >
@@ -175,7 +177,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
             <button
               key={tab.id}
               className={cn(
-                "group flex items-center gap-1.5 rounded-md px-3 py-1 text-xs transition-colors min-w-0 max-w-[180px] shrink-0",
+                `group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors min-w-0 max-w-[180px] shrink-0 ${focusRing}`,
                 isActive
                   ? (inTerminal ? styles.activeTabText : styles.tabActive)
                   : styles.tabInactive
@@ -221,7 +223,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
-                className={cn("inline-flex items-center justify-center rounded-md transition-colors mr-1", styles.iconBtn)}
+                className={cn("inline-flex items-center justify-center rounded-md transition-colors mr-1", styles.iconBtn, focusRing)}
               >
                 <Palette className="h-3.5 w-3.5" />
               </button>
@@ -250,7 +252,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
         <button
           type="button"
           aria-label="Minimize"
-          className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn)}
+          className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn, focusRing)}
           onClick={() => getAppWindow().minimize().catch(console.error)}
         >
           <Minus className="h-3.5 w-3.5" />
@@ -258,7 +260,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
         <button
           type="button"
           aria-label="Maximize"
-          className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn)}
+          className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn, focusRing)}
           onClick={() => getAppWindow().toggleMaximize().catch(console.error)}
         >
           <Square className="h-3 w-3" />
@@ -266,7 +268,7 @@ export function TitleBar({ onCloseTab, terminalBg, themeAccent, themeVariant }: 
         <button
           type="button"
           aria-label="Close"
-          className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn, styles.closeHover)}
+          className={cn("inline-flex items-center justify-center rounded-md transition-colors", styles.iconBtn, styles.closeHover, focusRing)}
           onClick={() => getAppWindow().close().catch(console.error)}
         >
           <X className="h-3.5 w-3.5" />

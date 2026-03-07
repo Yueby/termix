@@ -83,3 +83,74 @@ export const localResize = (sessionId: string, cols: number, rows: number) =>
 
 export const localClose = (sessionId: string) =>
   invoke<void>("local_close", { sessionId });
+
+// Connection CRUD
+export interface ConnectionInfo {
+  id: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  authType: string;
+  group: string;
+  password: string;
+  keyPath: string;
+  keyPassphrase: string;
+}
+
+export const getConnections = () =>
+  invoke<ConnectionInfo[]>("get_connections");
+
+export const saveConnection = (conn: ConnectionInfo) =>
+  invoke<void>("save_connection", { conn });
+
+export const deleteConnection = (id: string) =>
+  invoke<void>("delete_connection", { id });
+
+// Settings CRUD
+export interface AppSettings {
+  theme: string;
+  fontFamily: string;
+  fontSize: number;
+  cursorStyle: string;
+  scrollBack: number;
+  terminalThemeId: string;
+  defaultShell: string;
+  webdavUrl: string;
+  webdavUsername: string;
+  webdavPassword: string;
+  webdavRemoteDir: string;
+}
+
+export const getSettings = () =>
+  invoke<AppSettings>("get_settings");
+
+export const saveSettings = (settings: AppSettings) =>
+  invoke<void>("save_settings", { settings });
+
+// Snippet CRUD
+export interface Snippet {
+  id: string;
+  name: string;
+  content: string;
+  tags: string[];
+}
+
+export const getSnippets = () =>
+  invoke<Snippet[]>("get_snippets");
+
+export const saveSnippet = (snippet: Snippet) =>
+  invoke<void>("save_snippet", { snippet });
+
+export const deleteSnippet = (id: string) =>
+  invoke<void>("delete_snippet", { id });
+
+// Sync
+export const syncPush = () =>
+  invoke<string>("sync_push");
+
+export const syncPull = () =>
+  invoke<string>("sync_pull");
+
+export const syncTestConnection = () =>
+  invoke<string>("sync_test_connection");

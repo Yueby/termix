@@ -142,7 +142,7 @@ export function SnippetDetail() {
                 <Badge key={tag} variant="secondary" className="gap-1 text-xs">
                   {tag}
                   <button
-                    className="ml-0.5 hover:text-destructive"
+                    className="ml-0.5 rounded-sm hover:text-destructive outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
                     onClick={() => handleRemoveTag(tag)}
                   >
                     <X className="h-2.5 w-2.5" />

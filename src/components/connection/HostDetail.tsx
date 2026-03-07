@@ -46,7 +46,7 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
       setHost(conn.host);
       setPort(conn.port);
       setUsername(conn.username);
-      setAuthType(conn.authType);
+      setAuthType(conn.authType as "password" | "key");
       setGroup(conn.group);
       setPassword(conn.password ?? "");
       setKeyPath(conn.keyPath ?? "");
