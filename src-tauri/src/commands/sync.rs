@@ -93,6 +93,8 @@ pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
     let mut keychain_items = db.get_keychain_items().await.map_err(|e| e.to_string())?;
     for item in keychain_items.iter_mut() {
         item.private_key = sync_encrypt(&item.private_key, &sync_pw)?;
+        item.public_key = sync_encrypt(&item.public_key, &sync_pw)?;
+        item.certificate = sync_encrypt(&item.certificate, &sync_pw)?;
         item.passphrase = sync_encrypt(&item.passphrase, &sync_pw)?;
     }
     let keychain_json = serde_json::to_string_pretty(&keychain_items).map_err(|e| e.to_string())?;
@@ -186,6 +188,8 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
             Ok(mut remote_items) => {
                 for item in remote_items.iter_mut() {
                     item.private_key = sync_decrypt(&item.private_key, &sync_pw)?;
+                    item.public_key = sync_decrypt(&item.public_key, &sync_pw)?;
+                    item.certificate = sync_decrypt(&item.certificate, &sync_pw)?;
                     item.passphrase = sync_decrypt(&item.passphrase, &sync_pw)?;
                 }
                 let count = remote_items.len();

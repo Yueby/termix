@@ -4,13 +4,19 @@ use aes_gcm::{
 };
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use keyring::Entry;
+use std::path::PathBuf;
 use std::sync::Mutex;
 
-const KEYRING_SERVICE: &str = "com.termix.app";
-const KEYRING_ACCOUNT: &str = "encryption-key";
+const KEY_FILE_NAME: &str = ".termix_key";
 
 static CACHED_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
+
+fn key_file_path() -> Result<PathBuf> {
+    let app_dir = dirs::data_dir()
+        .or_else(|| dirs::home_dir())
+        .ok_or_else(|| anyhow::anyhow!("Cannot determine app data directory"))?;
+    Ok(app_dir.join("com.termix.app").join(KEY_FILE_NAME))
+}
 
 fn get_or_create_key() -> Result<[u8; 32]> {
     let mut cached = CACHED_KEY.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
@@ -18,31 +24,29 @@ fn get_or_create_key() -> Result<[u8; 32]> {
         return Ok(key);
     }
 
-    let entry = Entry::new(KEYRING_SERVICE, KEYRING_ACCOUNT)
-        .map_err(|e| anyhow::anyhow!("Failed to access system keyring: {}", e))?;
+    let path = key_file_path()?;
 
-    let key = match entry.get_password() {
-        Ok(encoded) => {
-            let bytes = BASE64.decode(&encoded).context("Failed to decode key from keyring")?;
-            if bytes.len() != 32 {
-                anyhow::bail!("Invalid encryption key length in keyring");
-            }
-            let mut k = [0u8; 32];
-            k.copy_from_slice(&bytes);
-            k
+    let key = if path.exists() {
+        let encoded = std::fs::read_to_string(&path).context("Failed to read key file")?;
+        let bytes = BASE64.decode(encoded.trim()).context("Failed to decode key from file")?;
+        if bytes.len() != 32 {
+            anyhow::bail!("Invalid encryption key length in key file");
         }
-        Err(keyring::Error::NoEntry) => {
-            use aes_gcm::aead::rand_core::RngCore;
-            let mut k = [0u8; 32];
-            OsRng.fill_bytes(&mut k);
-            let encoded = BASE64.encode(k);
-            entry
-                .set_password(&encoded)
-                .map_err(|e| anyhow::anyhow!("Failed to store key in keyring: {}", e))?;
-            log::info!("New random encryption key generated and stored in system keyring");
-            k
+        let mut k = [0u8; 32];
+        k.copy_from_slice(&bytes);
+        k
+    } else {
+        use aes_gcm::aead::rand_core::RngCore;
+        let mut k = [0u8; 32];
+        OsRng.fill_bytes(&mut k);
+        let encoded = BASE64.encode(k);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .context("Failed to create key file directory")?;
         }
-        Err(e) => return Err(anyhow::anyhow!("Keyring error: {}", e)),
+        std::fs::write(&path, &encoded).context("Failed to write key file")?;
+        log::info!("New random encryption key generated and stored at {:?}", path);
+        k
     };
 
     *cached = Some(key);

@@ -1,6 +1,6 @@
+import { useContextMenu } from "@/hooks/use-context-menu";
 import type { FileEntry } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import { useContextMenu } from "@/hooks/use-context-menu";
 import {
     AlertCircle,
     AppWindow,
@@ -34,6 +34,7 @@ interface FileTableProps {
   loading: boolean;
   error: string | null;
   showParent: boolean;
+  showHiddenFiles?: boolean;
   onDoubleClick: (name: string, isDir: boolean) => void;
   onAction?: (action: FileAction, file?: FileEntry) => void;
   isRemote?: boolean;
@@ -66,7 +67,7 @@ function sortFiles(files: FileEntry[], key: SortKey, dir: SortDir): FileEntry[] 
   });
 }
 
-export function FileTable({ files, loading, error, showParent, onDoubleClick, onAction, isRemote, isDragOver }: FileTableProps) {
+export function FileTable({ files, loading, error, showParent, showHiddenFiles, onDoubleClick, onAction, isRemote, isDragOver }: FileTableProps) {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [menuFile, setMenuFile] = useState<FileEntry | undefined>(undefined);
   const [sortKey, setSortKey] = useState<SortKey>("name");
@@ -74,7 +75,11 @@ export function FileTable({ files, loading, error, showParent, onDoubleClick, on
   const containerRef = useRef<HTMLDivElement>(null);
   const { menu, menuRef, open, close } = useContextMenu();
 
-  const sortedFiles = useMemo(() => sortFiles(files, sortKey, sortDir), [files, sortKey, sortDir]);
+  const visibleFiles = useMemo(
+    () => showHiddenFiles ? files : files.filter((f) => !f.name.startsWith(".")),
+    [files, showHiddenFiles],
+  );
+  const sortedFiles = useMemo(() => sortFiles(visibleFiles, sortKey, sortDir), [visibleFiles, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {

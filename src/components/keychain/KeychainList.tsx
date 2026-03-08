@@ -1,12 +1,18 @@
 import { ListPage } from "@/components/layout/ListPage";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useContextMenu } from "@/hooks/use-context-menu";
 import { importKeyFile, type KeychainItem } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import { isKeychainItemEmpty, useKeychainStore } from "@/stores/keychain-store";
 import { useUiStore } from "@/stores/ui-store";
 import { open } from "@tauri-apps/plugin-dialog";
-import { KeyRound, Pencil, Plus, Import, Trash2 } from "lucide-react";
+import { ChevronDown, Import, KeyRound, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 export function KeychainList() {
@@ -31,13 +37,24 @@ export function KeychainList() {
     );
   }, [items, search]);
 
-  const handleNewKey = () => {
+  const handleGenerateKey = () => {
     const id = crypto.randomUUID();
     useKeychainStore.getState().addItem({
-      id, name: "", keyType: "ssh-key", privateKey: "", passphrase: "",
+      id, name: "", keyType: "ssh-key", privateKey: "", publicKey: "", certificate: "", passphrase: "",
     });
     setSelectedKeychainId(id);
     setEditingKeychainId(id);
+    useUiStore.getState().setKeychainGenerateMode(true);
+  };
+
+  const handleNewKey = () => {
+    const id = crypto.randomUUID();
+    useKeychainStore.getState().addItem({
+      id, name: "", keyType: "ssh-key", privateKey: "", publicKey: "", certificate: "", passphrase: "",
+    });
+    setSelectedKeychainId(id);
+    setEditingKeychainId(id);
+    useUiStore.getState().setKeychainGenerateMode(false);
   };
 
   const handleImport = async () => {
@@ -58,6 +75,8 @@ export function KeychainList() {
         name: fileName,
         keyType: detectKeyType(content),
         privateKey: content,
+        publicKey: "",
+        certificate: "",
         passphrase: "",
       };
       useKeychainStore.getState().addItem(item);
@@ -84,6 +103,7 @@ export function KeychainList() {
     }
     setSelectedKeychainId(targetId);
     setEditingKeychainId(targetId);
+    useUiStore.getState().setKeychainGenerateMode(false);
   }, [setSelectedKeychainId, setEditingKeychainId]);
 
   const deleteItem = items.find((i) => i.id === deleteTarget);
@@ -98,9 +118,21 @@ export function KeychainList() {
         searchPlaceholder="Search keys..."
         actionButtons={
           <>
-            <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={handleNewKey}>
-              <Plus className="h-3 w-3" /> NEW KEY
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline" className="h-7 gap-1 text-xs">
+                  <KeyRound className="h-3 w-3" /> KEY <ChevronDown className="h-3 w-3 ml-0.5 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuItem onClick={handleNewKey}>
+                  <Plus className="h-3.5 w-3.5 mr-2" /> New Key
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleGenerateKey}>
+                  <Sparkles className="h-3.5 w-3.5 mr-2" /> Generate Key
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button size="sm" variant="outline" className="h-7 gap-1.5 text-xs" onClick={handleImport}>
               <Import className="h-3 w-3" /> IMPORT
             </Button>

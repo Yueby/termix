@@ -59,6 +59,7 @@ pub fn run() {
             commands::keychain::save_keychain_item,
             commands::keychain::delete_keychain_item,
             commands::keychain::import_key_file,
+            commands::keychain::generate_ssh_key,
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::snippet::get_snippets,
