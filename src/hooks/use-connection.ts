@@ -1,5 +1,7 @@
 import { createLogger } from "@/lib/logger";
-import { detectShells, localClose, localOpen, sshConnect, sshDisconnect } from "@/lib/tauri";
+import { startBuffering, stopBuffering } from "@/lib/session-data-bridge";
+import { detectShells, localClose, localOpen, saveTerminalLog, sshConnect, sshDisconnect } from "@/lib/tauri";
+import { getTerminalCreatedAt, serializeTerminal } from "@/lib/terminal-registry";
 import { useConnectionStore, type ConnectionInfo } from "@/stores/connection-store";
 import { useKeychainStore } from "@/stores/keychain-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -60,10 +62,9 @@ export function useConnectionHandlers() {
           auth_method: authMethod,
         });
 
+        startBuffering(result.session_id, "ssh_data");
         pushLog("Session established.");
-        updateTab(tabId, { status: "connected" });
-        await delay(400);
-        updateTab(tabId, { sessionId: result.session_id });
+        updateTab(tabId, { status: "connected", sessionId: result.session_id });
 
         if (conn.id && password) {
           useConnectionStore.getState().updateConnection(conn.id, {
@@ -141,6 +142,7 @@ export function useConnectionHandlers() {
 
   const handleDisconnect = useCallback(
     (sessionId: string, reason: string) => {
+      stopBuffering(sessionId);
       const { tabs: currentTabs, updateTab: update } = useSessionStore.getState();
       const tab = currentTabs.find((t) => t.sessionId === sessionId);
       if (tab) update(tab.id, { status: "disconnected", error: reason, sessionId: null });
@@ -150,6 +152,7 @@ export function useConnectionHandlers() {
 
   const disconnectTab = useCallback(async (tab: { sessionId: string | null; type: string; id: string }) => {
     if (tab.sessionId) {
+      await stopBuffering(tab.sessionId);
       if (tab.type === "local") {
         await localClose(tab.sessionId).catch((e) => logger.warn("localClose failed:", tab.id, e));
       } else {
@@ -158,33 +161,57 @@ export function useConnectionHandlers() {
     }
   }, []);
 
+  const captureAndSaveLog = useCallback((tab: { id: string; connectionId: string; title: string; host: string; username: string; type: string }) => {
+    if (tab.type === "log") return;
+    const content = serializeTerminal(tab.id);
+    if (!content || content.trim().length === 0) return;
+
+    const createdAt = getTerminalCreatedAt(tab.id);
+    const now = Math.floor(Date.now() / 1000);
+
+    saveTerminalLog({
+      id: crypto.randomUUID(),
+      connectionId: tab.connectionId,
+      connectionName: tab.title,
+      host: tab.host || "localhost",
+      username: tab.username || "",
+      sessionType: tab.type === "local" ? "local" : "ssh",
+      startedAt: createdAt ? Math.floor(createdAt / 1000) : now,
+      endedAt: now,
+      content,
+    }).catch((e) => logger.warn("Failed to save terminal log:", e));
+  }, []);
+
   const handleCloseTab = useCallback(
     async (tabId: string) => {
       const { tabs: currentTabs } = useSessionStore.getState();
       const tab = currentTabs.find((t) => t.id === tabId);
+      if (tab) captureAndSaveLog(tab);
       removeTab(tabId);
       if (tab) await disconnectTab(tab);
     },
-    [removeTab, disconnectTab]
+    [removeTab, disconnectTab, captureAndSaveLog]
   );
 
   const handleCloseOtherTabs = useCallback(
     async (keepTabId: string) => {
       const { tabs: currentTabs, removeOtherTabs } = useSessionStore.getState();
       const others = currentTabs.filter((t) => t.id !== keepTabId);
+      others.forEach((t) => captureAndSaveLog(t));
       removeOtherTabs(keepTabId);
       await Promise.all(others.map(disconnectTab));
     },
-    [disconnectTab]
+    [disconnectTab, captureAndSaveLog]
   );
 
   const handleCloseAllTabs = useCallback(
     async () => {
       const { tabs: currentTabs, removeAllTabs } = useSessionStore.getState();
+      currentTabs.forEach((t) => captureAndSaveLog(t));
       removeAllTabs();
       await Promise.all(currentTabs.map(disconnectTab));
     },
-    [disconnectTab]
+    [disconnectTab, captureAndSaveLog]
   );
 
   const handleOpenLocal = useCallback(async () => {
@@ -203,6 +230,7 @@ export function useConnectionHandlers() {
       }
 
       const result = await localOpen(80, 24, shell, shellArgs);
+      startBuffering(result.session_id, "local_data");
 
       const tabId = crypto.randomUUID();
       const currentTabs = useSessionStore.getState().tabs;

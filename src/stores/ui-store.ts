@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type NavPage = "hosts" | "snippets" | "keychain" | "port-forwarding" | "known-hosts";
+export type NavPage = "hosts" | "snippets" | "keychain" | "port-forwarding" | "known-hosts" | "logs";
 export type ActiveView = "home" | "sftp";
 export type ListLayout = "list" | "grid";
 

@@ -14,7 +14,14 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
 import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import {
     Check,
+    ExternalLink,
     FolderOpen,
     Info,
     Loader2,
@@ -22,6 +29,7 @@ import {
     Minus,
     Palette,
     Pencil,
+    ScrollText,
     Server,
     Settings,
     Square,
@@ -31,6 +39,8 @@ import {
     X,
     XCircle,
 } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useRef, useState } from "react";
 
 const logger = createLogger("titlebar");
@@ -43,7 +53,7 @@ function getAppWindow() {
 
 const focusRing = "outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
 
-function getThemeClasses(inTerminal: boolean, isDark: boolean) {
+function getThemeClasses(inTerminal: boolean) {
   if (!inTerminal) {
     return {
       tabActive: "bg-primary/15 text-primary font-medium",
@@ -52,29 +62,17 @@ function getThemeClasses(inTerminal: boolean, isDark: boolean) {
       closeHover: "hover:bg-destructive hover:text-destructive-foreground",
       separator: "bg-border",
       tabClose: "hover:bg-muted",
-      activeTabText: "",
     };
   }
-  if (isDark) {
-    return {
-      tabActive: "",
-      tabInactive: "bg-white/10 text-white/70 hover:bg-white/20 hover:text-white/90",
-      iconBtn: "h-7 w-7 text-white/70 hover:text-white hover:bg-white/10",
-      closeHover: "hover:bg-red-500/80 hover:text-white",
-      separator: "bg-white/20",
-      tabClose: "hover:bg-white/20",
-      activeTabText: "text-white",
-    };
-  }
-  return {
-    tabActive: "",
-    tabInactive: "bg-black/8 text-black/60 hover:bg-black/12 hover:text-black/80",
-    iconBtn: "h-7 w-7 text-black/60 hover:text-black/80 hover:bg-black/8",
+  const termBase = {
+    tabActive: "bg-[var(--tf-bg)] text-[var(--tf-bright)] font-semibold",
+    tabInactive: "bg-[var(--tf-bg-dim)] text-[var(--tf-dim)] font-medium hover:bg-[var(--tf-bg)] hover:text-[var(--tf-hover)]",
+    iconBtn: "h-7 w-7 text-[var(--tf-dim)] hover:text-[var(--tf)] hover:bg-[var(--tf-bg)]",
     closeHover: "hover:bg-red-500/80 hover:text-white",
-    separator: "bg-black/15",
-    tabClose: "hover:bg-black/12",
-    activeTabText: "text-black/90",
+    separator: "bg-[var(--tf-sep)]",
+    tabClose: "hover:bg-[var(--tf-bg)]",
   };
+  return termBase;
 }
 
 interface TitleBarProps {
@@ -82,11 +80,10 @@ interface TitleBarProps {
   onCloseOtherTabs: (keepTabId: string) => void;
   onCloseAllTabs: () => void;
   terminalBg?: string;
-  themeAccent?: string;
-  themeVariant?: "dark" | "light";
+  terminalFg?: string;
 }
 
-export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, terminalBg, themeAccent, themeVariant }: TitleBarProps) {
+export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, terminalBg, terminalFg }: TitleBarProps) {
   const { tabs, activeTabId, setActiveTab, updateTab } = useSessionStore();
   const { activeView, setActiveView, setSelectedHostId, setEditingHostId, setSettingsOpen } = useUiStore();
   const { terminalThemeId, setTerminalThemeId } = useSettingsStore();
@@ -96,12 +93,17 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion("0.1.0"));
+  }, []);
 
   const isHome = activeTabId === null;
   const isSftp = isHome && activeView === "sftp";
   const inTerminal = !isHome && !!terminalBg;
-  const isDarkTerminal = inTerminal && themeVariant !== "light";
-  const styles = getThemeClasses(inTerminal, isDarkTerminal);
+  const styles = getThemeClasses(inTerminal);
 
   const goHome = () => {
     useSessionStore.getState().setActiveTab(null);
@@ -170,7 +172,16 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
         "flex h-12 shrink-0 items-center select-none",
         !inTerminal && "border-b bg-background"
       )}
-      style={inTerminal ? { backgroundColor: terminalBg } : undefined}
+      style={inTerminal ? {
+        backgroundColor: terminalBg,
+        '--tf': terminalFg,
+        '--tf-dim': terminalFg ? `color-mix(in srgb, ${terminalFg} 60%, transparent)` : undefined,
+        '--tf-hover': terminalFg ? `color-mix(in srgb, ${terminalFg} 80%, transparent)` : undefined,
+        '--tf-bright': terminalFg ? `color-mix(in srgb, ${terminalFg} 75%, white)` : undefined,
+        '--tf-bg': terminalFg ? `color-mix(in srgb, ${terminalFg} 18%, transparent)` : undefined,
+        '--tf-bg-dim': terminalFg ? `color-mix(in srgb, ${terminalFg} 6%, transparent)` : undefined,
+        '--tf-sep': terminalFg ? `color-mix(in srgb, ${terminalFg} 20%, transparent)` : undefined,
+      } as React.CSSProperties : undefined}
       onMouseDown={handleTitleBarMouseDown}
     >
       {/* Left: hamburger dropdown menu */}
@@ -192,7 +203,7 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
             Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setAboutOpen(true)}>
             <Info className="mr-2 h-4 w-4" />
             About Termix
           </DropdownMenuItem>
@@ -244,17 +255,14 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
               key={tab.id}
               className={cn(
                 `group flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs transition-colors min-w-0 max-w-[180px] shrink-0 animate-in fade-in-0 slide-in-from-left-2 duration-150 ${focusRing}`,
-                isActive
-                  ? (inTerminal ? styles.activeTabText : styles.tabActive)
-                  : styles.tabInactive
+                isActive ? styles.tabActive : styles.tabInactive
               )}
-              style={isActive && inTerminal && themeAccent
-                ? { backgroundColor: themeAccent + "59" }
-                : undefined}
               onClick={() => setActiveTab(tab.id)}
               onContextMenu={(e) => handleTabContextMenu(e, tab.id)}
             >
-              {isProgressing ? (
+              {tab.type === "log" ? (
+                <ScrollText className="h-3 w-3 shrink-0" />
+              ) : isProgressing ? (
                 <Loader2 className="h-3 w-3 shrink-0 animate-spin" />
               ) : tab.status === "connected" && tab.type === "local" ? (
                 <Terminal className="h-3 w-3 shrink-0" />
@@ -407,6 +415,54 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      <Dialog open={aboutOpen} onOpenChange={setAboutOpen}>
+        <DialogContent className="sm:max-w-sm" onMouseDown={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()} onOpenAutoFocus={(e) => e.preventDefault()}>
+          <DialogHeader className="items-center">
+            <svg className="h-16 w-16 rounded-xl" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+              <defs>
+                <linearGradient id="about-bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#1a1b26"/>
+                  <stop offset="100%" stopColor="#24283b"/>
+                </linearGradient>
+                <linearGradient id="about-accent" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stopColor="#7aa2f7"/>
+                  <stop offset="100%" stopColor="#bb9af7"/>
+                </linearGradient>
+              </defs>
+              <rect x="16" y="16" width="480" height="480" rx="96" fill="url(#about-bg)"/>
+              <rect x="16" y="16" width="480" height="480" rx="96" stroke="url(#about-accent)" strokeWidth="3" strokeOpacity="0.3" fill="none"/>
+              <path d="M 128 192 L 224 264 L 128 336" stroke="url(#about-accent)" strokeWidth="36" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+              <line x1="260" y1="320" x2="384" y2="320" stroke="#a9b1d6" strokeWidth="36" strokeLinecap="round" opacity="0.7"/>
+            </svg>
+            <DialogTitle className="text-lg">Termix</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              A modern, cross-platform SSH terminal client built with Tauri.
+            </p>
+            <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+              <span className="text-muted-foreground">Version</span>
+              <span className="font-mono text-xs">{appVersion}</span>
+            </div>
+            <div className="flex items-center justify-between rounded-md bg-muted/50 px-3 py-2">
+              <span className="text-muted-foreground">Stack</span>
+              <span className="text-xs">Tauri v2 + React + Rust</span>
+            </div>
+            <div
+              className="flex w-full items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-sm hover:bg-muted transition-colors cursor-pointer"
+              role="link"
+              onClick={() => openUrl("https://github.com/Yueby/termix")}
+            >
+              <span className="text-muted-foreground">GitHub</span>
+              <span className="flex items-center gap-1 text-xs text-primary">
+                Yueby/termix
+                <ExternalLink className="h-3 w-3" />
+              </span>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

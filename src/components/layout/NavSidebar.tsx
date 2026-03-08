@@ -1,12 +1,13 @@
-import {
-  Server,
-  ArrowLeftRight,
-  Code2,
-  Globe,
-  KeyRound,
-} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUiStore, type NavPage } from "@/stores/ui-store";
+import {
+    ArrowLeftRight,
+    Code2,
+    Globe,
+    KeyRound,
+    ScrollText,
+    Server,
+} from "lucide-react";
 
 const NAV_ITEMS: { key: NavPage; label: string; icon: typeof Server }[] = [
   { key: "hosts", label: "Hosts", icon: Server },
@@ -14,6 +15,7 @@ const NAV_ITEMS: { key: NavPage; label: string; icon: typeof Server }[] = [
   { key: "snippets", label: "Snippets", icon: Code2 },
   { key: "port-forwarding", label: "Port Forwarding", icon: ArrowLeftRight },
   { key: "known-hosts", label: "Known Hosts", icon: Globe },
+  { key: "logs", label: "Logs", icon: ScrollText },
 ];
 
 export function NavSidebar() {

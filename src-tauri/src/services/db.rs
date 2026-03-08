@@ -136,6 +136,22 @@ impl Database {
         let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_passphrase TEXT NOT NULL DEFAULT ''")
             .execute(&self.pool).await;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS terminal_logs (
+                id TEXT PRIMARY KEY,
+                connection_id TEXT NOT NULL DEFAULT '',
+                connection_name TEXT NOT NULL DEFAULT '',
+                host TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                session_type TEXT NOT NULL DEFAULT 'ssh',
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER NOT NULL,
+                content TEXT NOT NULL DEFAULT ''
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -424,6 +440,65 @@ impl Database {
         .bind(record_id)
         .execute(&self.pool)
         .await?;
+        Ok(())
+    }
+
+    // ── Terminal Logs ──
+
+    pub async fn get_terminal_logs(&self) -> Result<Vec<crate::commands::terminal_log::TerminalLogEntry>> {
+        let rows: Vec<(String, String, String, String, String, String, i64, i64)> = sqlx::query_as(
+            "SELECT id, connection_id, connection_name, host, username, session_type, started_at, ended_at
+             FROM terminal_logs ORDER BY ended_at DESC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|(id, connection_id, connection_name, host, username, session_type, started_at, ended_at)| {
+            crate::commands::terminal_log::TerminalLogEntry { id, connection_id, connection_name, host, username, session_type, started_at, ended_at }
+        }).collect())
+    }
+
+    pub async fn get_terminal_log_content(&self, id: &str) -> Result<Option<String>> {
+        let row: Option<(String,)> = sqlx::query_as(
+            "SELECT content FROM terminal_logs WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|(c,)| c))
+    }
+
+    pub async fn save_terminal_log(&self, log: &crate::commands::terminal_log::SaveTerminalLog) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO terminal_logs (id, connection_id, connection_name, host, username, session_type, started_at, ended_at, content)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&log.id)
+        .bind(&log.connection_id)
+        .bind(&log.connection_name)
+        .bind(&log.host)
+        .bind(&log.username)
+        .bind(&log.session_type)
+        .bind(log.started_at)
+        .bind(log.ended_at)
+        .bind(&log.content)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_terminal_log(&self, id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM terminal_logs WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn clear_terminal_logs(&self) -> Result<()> {
+        sqlx::query("DELETE FROM terminal_logs")
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
