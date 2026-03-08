@@ -1,6 +1,11 @@
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
+} from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
     Select,
@@ -10,21 +15,17 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover";
+import { importKeyFile } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import {
     useConnectionStore,
     type ConnectionInfo,
 } from "@/stores/connection-store";
 import { useKeychainStore } from "@/stores/keychain-store";
 import { useUiStore } from "@/stores/ui-store";
-import { importKeyFile } from "@/lib/tauri";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Eye, EyeOff, Import, KeyRound, PanelRightClose, Plus, Server, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, Eye, EyeOff, FolderOpen, Import, KeyRound, PanelRightClose, Plus, Server, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 interface HostDetailProps {
   onConnect: (conn: ConnectionInfo) => void;
@@ -50,6 +51,9 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
   const [keychainId, setKeychainId] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [keyPickerOpen, setKeyPickerOpen] = useState(false);
+  const [groupPickerOpen, setGroupPickerOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const newGroupInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (conn) {
@@ -117,7 +121,7 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
       const id = crypto.randomUUID();
       const keyType = content.includes("RSA") ? "ssh-key" : "ssh-key";
       await useKeychainStore.getState().addItem({
-        id, name: fileName, keyType, privateKey: content, passphrase: "",
+        id, name: fileName, keyType, privateKey: content, publicKey: "", certificate: "", passphrase: "",
       });
       setKeychainId(id);
       setKeyPath("");
@@ -197,12 +201,59 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
               value={username}
               onChange={(e) => { setUsername(e.target.value); save({ username: e.target.value }); }}
             />
-            <Select value={group} onValueChange={(v) => { setGroup(v); save({ group: v }); }}>
-              <SelectTrigger><SelectValue placeholder="Group" /></SelectTrigger>
-              <SelectContent>
-                {groups.map((g) => (<SelectItem key={g} value={g}>{g}</SelectItem>))}
-              </SelectContent>
-            </Select>
+            <Popover open={groupPickerOpen} onOpenChange={(open) => { setGroupPickerOpen(open); if (open) setNewGroupName(""); }}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="w-full justify-between text-sm font-normal">
+                  <span className="flex items-center gap-2">
+                    <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                    {group}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-1" align="start">
+                <div className="max-h-48 overflow-y-auto">
+                  {groups.map((g) => (
+                    <button
+                      key={g}
+                      className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+                      onClick={() => { setGroup(g); save({ group: g }); setGroupPickerOpen(false); }}
+                    >
+                      <Check className={cn("h-3.5 w-3.5 shrink-0", group === g ? "opacity-100" : "opacity-0")} />
+                      <span className="truncate">{g}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="border-t mt-1 pt-1">
+                  <form
+                    className="flex items-center gap-1 px-1"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const trimmed = newGroupName.trim();
+                      if (trimmed && !groups.includes(trimmed)) {
+                        setGroup(trimmed);
+                        save({ group: trimmed });
+                        setGroupPickerOpen(false);
+                      } else if (trimmed) {
+                        setGroup(trimmed);
+                        save({ group: trimmed });
+                        setGroupPickerOpen(false);
+                      }
+                    }}
+                  >
+                    <Input
+                      ref={newGroupInputRef}
+                      className="h-7 text-xs flex-1"
+                      placeholder="New group..."
+                      value={newGroupName}
+                      onChange={(e) => setNewGroupName(e.target.value)}
+                    />
+                    <Button type="submit" size="icon" variant="ghost" className="h-7 w-7 shrink-0" disabled={!newGroupName.trim()}>
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  </form>
+                </div>
+              </PopoverContent>
+            </Popover>
           </section>
 
           <Separator />

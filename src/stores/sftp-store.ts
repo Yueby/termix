@@ -72,7 +72,9 @@ interface SftpState {
   leftPanel: SftpPanelState;
   rightPanel: SftpPanelState;
   initialized: boolean;
+  showHiddenFiles: boolean;
 
+  toggleHiddenFiles: () => void;
   init: () => Promise<void>;
   navigateTo: (side: PanelSide, path: string) => Promise<void>;
   refresh: (side: PanelSide) => Promise<void>;
@@ -131,6 +133,9 @@ export const useSftpStore = create<SftpState>()((set, get) => ({
   leftPanel: createDefaultPanel("local"),
   rightPanel: createDefaultPanel("remote"),
   initialized: false,
+  showHiddenFiles: false,
+
+  toggleHiddenFiles: () => set((s) => ({ showHiddenFiles: !s.showHiddenFiles })),
 
   init: async () => {
     if (get().initialized) return;

@@ -1,16 +1,16 @@
-import { useEffect } from "react";
-import { Terminal, Settings } from "lucide-react";
 import {
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
+    CommandDialog,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
+    CommandSeparator,
 } from "@/components/ui/command";
 import { useConnectionStore, type ConnectionInfo } from "@/stores/connection-store";
 import { useUiStore } from "@/stores/ui-store";
+import { Settings, Terminal } from "lucide-react";
+import { useEffect, useMemo } from "react";
 
 interface CommandPaletteProps {
   onConnect: (connection: ConnectionInfo) => void;
@@ -32,6 +32,22 @@ export function CommandPalette({ onConnect }: CommandPaletteProps) {
     return () => document.removeEventListener("keydown", down);
   }, [setCommandPaletteOpen]);
 
+  const grouped = useMemo(() => {
+    const map = new Map<string, ConnectionInfo[]>();
+    for (const conn of connections) {
+      const g = conn.group || "Default";
+      if (!map.has(g)) map.set(g, []);
+      map.get(g)!.push(conn);
+    }
+    const entries = [...map.entries()];
+    entries.sort(([a], [b]) => {
+      if (a === "Default") return -1;
+      if (b === "Default") return 1;
+      return a.localeCompare(b);
+    });
+    return entries;
+  }, [connections]);
+
   const handleSelect = (action: () => void) => {
     action();
     setCommandPaletteOpen(false);
@@ -42,9 +58,9 @@ export function CommandPalette({ onConnect }: CommandPaletteProps) {
       <CommandInput placeholder="Type a command or search..." />
       <CommandList>
         <CommandEmpty>No results found.</CommandEmpty>
-        {connections.length > 0 && (
-          <CommandGroup heading="Connections">
-            {connections.map((conn) => (
+        {grouped.map(([groupName, conns]) => (
+          <CommandGroup key={groupName} heading={groupName}>
+            {conns.map((conn) => (
               <CommandItem
                 key={conn.id}
                 onSelect={() => handleSelect(() => onConnect(conn))}
@@ -57,7 +73,7 @@ export function CommandPalette({ onConnect }: CommandPaletteProps) {
               </CommandItem>
             ))}
           </CommandGroup>
-        )}
+        ))}
         <CommandSeparator />
         <CommandGroup heading="Actions">
           <CommandItem onSelect={() => handleSelect(() => setSettingsOpen(true))}>

@@ -108,6 +108,8 @@ impl Database {
                 name TEXT NOT NULL,
                 key_type TEXT NOT NULL DEFAULT 'ssh-key',
                 encrypted_private_key TEXT NOT NULL DEFAULT '',
+                encrypted_public_key TEXT NOT NULL DEFAULT '',
+                encrypted_certificate TEXT NOT NULL DEFAULT '',
                 encrypted_passphrase TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
@@ -123,6 +125,15 @@ impl Database {
         let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_passphrase TEXT DEFAULT ''")
             .execute(&self.pool).await;
         let _ = sqlx::query("ALTER TABLE connections ADD COLUMN keychain_id TEXT DEFAULT ''")
+            .execute(&self.pool).await;
+
+        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_private_key TEXT NOT NULL DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_public_key TEXT NOT NULL DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_certificate TEXT NOT NULL DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_passphrase TEXT NOT NULL DEFAULT ''")
             .execute(&self.pool).await;
 
         Ok(())
@@ -304,28 +315,28 @@ impl Database {
     // ── Keychain ──
 
     pub async fn get_keychain_items(&self) -> Result<Vec<KeychainItem>> {
-        let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
-            "SELECT id, name, key_type, encrypted_private_key, encrypted_passphrase FROM keychain ORDER BY name",
+        let rows: Vec<(String, String, String, String, String, String, String)> = sqlx::query_as(
+            "SELECT id, name, key_type, encrypted_private_key, encrypted_public_key, encrypted_certificate, encrypted_passphrase FROM keychain ORDER BY name",
         )
         .fetch_all(&self.pool)
         .await?;
 
         let mut items = Vec::with_capacity(rows.len());
-        for (id, name, key_type, enc_pk, enc_pp) in rows {
-            let private_key = crypto::decrypt(&enc_pk).unwrap_or_else(|e| {
-                log::warn!("Failed to decrypt private_key for keychain {}: {}", id, e);
-                String::new()
-            });
-            let passphrase = crypto::decrypt(&enc_pp).unwrap_or_else(|e| {
-                log::warn!("Failed to decrypt passphrase for keychain {}: {}", id, e);
-                String::new()
-            });
+        for (id, name, key_type, enc_pk, enc_pub, enc_cert, enc_pp) in rows {
+            let decrypt = |field: &str, enc: &str| -> String {
+                crypto::decrypt(enc).unwrap_or_else(|e| {
+                    log::warn!("Failed to decrypt {} for keychain {}: {}", field, id, e);
+                    String::new()
+                })
+            };
             items.push(KeychainItem {
-                id,
+                id: id.clone(),
                 name,
                 key_type,
-                private_key,
-                passphrase,
+                private_key: decrypt("private_key", &enc_pk),
+                public_key: decrypt("public_key", &enc_pub),
+                certificate: decrypt("certificate", &enc_cert),
+                passphrase: decrypt("passphrase", &enc_pp),
             });
         }
         Ok(items)
@@ -334,18 +345,20 @@ impl Database {
     pub async fn save_keychain_item(&self, item: &KeychainItem) -> Result<()> {
         let now = now_epoch();
         let enc_pk = crypto::encrypt(&item.private_key)?;
+        let enc_pub = crypto::encrypt(&item.public_key)?;
+        let enc_cert = crypto::encrypt(&item.certificate)?;
         let enc_pp = crypto::encrypt(&item.passphrase)?;
 
         sqlx::query(
-            "INSERT INTO keychain (id, name, key_type, encrypted_private_key, encrypted_passphrase, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-             ON CONFLICT(id) DO UPDATE SET name=?, key_type=?, encrypted_private_key=?, encrypted_passphrase=?, updated_at=?",
+            "INSERT INTO keychain (id, name, key_type, encrypted_private_key, encrypted_public_key, encrypted_certificate, encrypted_passphrase, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET name=?, key_type=?, encrypted_private_key=?, encrypted_public_key=?, encrypted_certificate=?, encrypted_passphrase=?, updated_at=?",
         )
         .bind(&item.id).bind(&item.name).bind(&item.key_type)
-        .bind(&enc_pk).bind(&enc_pp)
+        .bind(&enc_pk).bind(&enc_pub).bind(&enc_cert).bind(&enc_pp)
         .bind(now).bind(now)
         .bind(&item.name).bind(&item.key_type)
-        .bind(&enc_pk).bind(&enc_pp)
+        .bind(&enc_pk).bind(&enc_pub).bind(&enc_cert).bind(&enc_pp)
         .bind(now)
         .execute(&self.pool)
         .await?;

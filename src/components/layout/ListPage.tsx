@@ -1,21 +1,21 @@
-import type { ReactNode } from "react";
-import type { LucideIcon } from "lucide-react";
-import { Search } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { LayoutToggle } from "@/components/ui/layout-toggle";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn, GRID_COLUMNS } from "@/lib/utils";
 import { useUiStore } from "@/stores/ui-store";
+import type { LucideIcon } from "lucide-react";
+import { Search } from "lucide-react";
+import type { ReactNode } from "react";
 
 interface ListPageProps<T> {
   items: T[];
@@ -31,6 +31,7 @@ interface ListPageProps<T> {
   emptyText: string;
   noItemsText: string;
   renderItem: (item: T) => ReactNode;
+  renderContent?: (items: T[]) => ReactNode;
   deleteOpen: boolean;
   onDeleteOpenChange: (open: boolean) => void;
   deleteTitle: string;
@@ -52,6 +53,7 @@ export function ListPage<T>({
   emptyText,
   noItemsText,
   renderItem,
+  renderContent,
   deleteOpen,
   onDeleteOpenChange,
   deleteTitle,
@@ -90,24 +92,26 @@ export function ListPage<T>({
       </div>
 
       <ScrollArea className="flex-1">
-        <div
-          className={cn("px-3 pt-1 pb-2 gap-2", isGrid ? "grid" : "flex flex-col")}
-          style={isGrid ? { gridTemplateColumns: GRID_COLUMNS } : undefined}
-        >
-          {items.map(renderItem)}
+        {renderContent ? renderContent(items) : (
+          <div
+            className={cn("px-3 pt-1 pb-2 gap-2", isGrid ? "grid" : "flex flex-col")}
+            style={isGrid ? { gridTemplateColumns: GRID_COLUMNS } : undefined}
+          >
+            {items.map(renderItem)}
 
-          {items.length === 0 && (
-            <div className={cn(
-              "flex flex-col items-center justify-center py-12 text-muted-foreground",
-              isGrid && "col-span-full"
-            )}>
-              <EmptyIcon className="mb-2 h-8 w-8 opacity-30" />
-              <p className="text-sm">
-                {totalCount === 0 ? noItemsText : emptyText}
-              </p>
-            </div>
-          )}
-        </div>
+            {items.length === 0 && (
+              <div className={cn(
+                "flex flex-col items-center justify-center py-12 text-muted-foreground",
+                isGrid && "col-span-full"
+              )}>
+                <EmptyIcon className="mb-2 h-8 w-8 opacity-30" />
+                <p className="text-sm">
+                  {totalCount === 0 ? noItemsText : emptyText}
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </ScrollArea>
 
       <AlertDialog open={deleteOpen} onOpenChange={onDeleteOpenChange}>

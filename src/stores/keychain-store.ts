@@ -12,7 +12,7 @@ export type { KeychainItem } from "@/lib/tauri";
 const logger = createLogger("keychain-store");
 
 export function isKeychainItemEmpty(item: KeychainItem): boolean {
-  return !item.name.trim() && !item.privateKey.trim();
+  return !item.name.trim() && !item.privateKey.trim() && !item.publicKey.trim() && !item.certificate.trim();
 }
 
 interface KeychainState {

@@ -4,6 +4,7 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { createLogger } from "@/lib/logger";
@@ -15,7 +16,7 @@ import { useSftpStore, type PanelSide } from "@/stores/sftp-store";
 import { useUiStore } from "@/stores/ui-store";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { ArrowLeft, FolderPlus, HardDrive, Monitor, MoreHorizontal, RefreshCw } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, FolderPlus, HardDrive, Monitor, MoreHorizontal, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { DeleteConfirmDialog } from "./DeleteConfirmDialog";
 import { EditPermissionsDialog } from "./EditPermissionsDialog";
@@ -45,6 +46,8 @@ export function FilePanel({ side, isDragOver }: FilePanelProps) {
   const deleteEntry = useSftpStore((s) => s.deleteEntry);
   const renameEntry = useSftpStore((s) => s.renameEntry);
   const chmod = useSftpStore((s) => s.chmod);
+  const showHiddenFiles = useSftpStore((s) => s.showHiddenFiles);
+  const toggleHiddenFiles = useSftpStore((s) => s.toggleHiddenFiles);
 
   const [refreshing, setRefreshing] = useState(false);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
@@ -325,6 +328,14 @@ export function FilePanel({ side, isDragOver }: FilePanelProps) {
               <RefreshCw className={cn("mr-2 h-3.5 w-3.5", refreshing && "animate-spin")} />
               Refresh
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={(e) => { e.preventDefault(); toggleHiddenFiles(); }}>
+              {showHiddenFiles
+                ? <Eye className="mr-2 h-3.5 w-3.5" />
+                : <EyeOff className="mr-2 h-3.5 w-3.5" />
+              }
+              Hidden Files
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -347,6 +358,7 @@ export function FilePanel({ side, isDragOver }: FilePanelProps) {
           panel.currentPath !== "" &&
           !/^[A-Z]:\\?$/i.test(panel.currentPath)
         }
+        showHiddenFiles={showHiddenFiles}
         onDoubleClick={handleFileDoubleClick}
         onAction={handleAction}
         isRemote={isRemote}

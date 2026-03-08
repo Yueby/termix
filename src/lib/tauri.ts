@@ -196,6 +196,8 @@ export interface KeychainItem {
   name: string;
   keyType: string;
   privateKey: string;
+  publicKey: string;
+  certificate: string;
   passphrase: string;
 }
 
@@ -210,6 +212,15 @@ export const deleteKeychainItem = (id: string) =>
 
 export const importKeyFile = (path: string) =>
   invoke<string>("import_key_file", { path });
+
+export interface GeneratedKey {
+  privateKey: string;
+  publicKey: string;
+  keyType: string;
+}
+
+export const generateSshKey = (keyType: string, bits?: number) =>
+  invoke<GeneratedKey>("generate_ssh_key", { keyType, bits });
 
 // Sync
 export const syncPush = () =>

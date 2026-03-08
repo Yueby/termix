@@ -32,6 +32,7 @@ interface UiState {
   commandPaletteOpen: boolean;
   settingsOpen: boolean;
   listLayout: ListLayout;
+  keychainGenerateMode: boolean;
   setNavPage: (page: NavPage) => void;
   setActiveView: (view: ActiveView) => void;
   setSelectedHostId: (id: string | null) => void;
@@ -44,6 +45,7 @@ interface UiState {
   setCommandPaletteOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
   setListLayout: (layout: ListLayout) => void;
+  setKeychainGenerateMode: (mode: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -61,6 +63,7 @@ export const useUiStore = create<UiState>()(
       commandPaletteOpen: false,
       settingsOpen: false,
       listLayout: "grid",
+      keychainGenerateMode: false,
 
       setNavPage: (page) => set({
         navPage: page,
@@ -90,6 +93,7 @@ export const useUiStore = create<UiState>()(
       setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
       setSettingsOpen: (open) => set({ settingsOpen: open }),
       setListLayout: (layout) => set({ listLayout: layout }),
+      setKeychainGenerateMode: (mode) => set({ keychainGenerateMode: mode }),
     }),
     {
       name: "termix-ui",
