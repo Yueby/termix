@@ -222,6 +222,37 @@ export interface GeneratedKey {
 export const generateSshKey = (keyType: string, bits?: number) =>
   invoke<GeneratedKey>("generate_ssh_key", { keyType, bits });
 
+// Terminal Logs
+export interface TerminalLogEntry {
+  id: string;
+  connectionId: string;
+  connectionName: string;
+  host: string;
+  username: string;
+  sessionType: string;
+  startedAt: number;
+  endedAt: number;
+}
+
+export interface SaveTerminalLog extends TerminalLogEntry {
+  content: string;
+}
+
+export const getTerminalLogs = () =>
+  invoke<TerminalLogEntry[]>("get_terminal_logs");
+
+export const getTerminalLogContent = (id: string) =>
+  invoke<string | null>("get_terminal_log_content", { id });
+
+export const saveTerminalLog = (log: SaveTerminalLog) =>
+  invoke<void>("save_terminal_log", { log });
+
+export const deleteTerminalLog = (id: string) =>
+  invoke<void>("delete_terminal_log", { id });
+
+export const clearTerminalLogs = () =>
+  invoke<void>("clear_terminal_logs");
+
 // Sync
 export const syncPush = () =>
   invoke<string>("sync_push");

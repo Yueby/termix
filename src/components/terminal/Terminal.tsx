@@ -1,13 +1,16 @@
 import { useContextMenu } from "@/hooks/use-context-menu";
 import { useSnippetAutocomplete } from "@/hooks/use-snippet-autocomplete";
 import { createLogger } from "@/lib/logger";
+import { attachConsumer, detachConsumer } from "@/lib/session-data-bridge";
 import { localResize, localWrite, sshResize, sshWrite } from "@/lib/tauri";
+import { registerTerminal, unregisterTerminal } from "@/lib/terminal-registry";
 import { getThemeById } from "@/lib/terminal-themes";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSnippetStore } from "@/stores/snippet-store";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { readText as clipboardRead, writeText as clipboardWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { FitAddon } from "@xterm/addon-fit";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -19,17 +22,13 @@ import { SnippetAutocomplete } from "./SnippetAutocomplete";
 
 const logger = createLogger("terminal");
 
-interface SshDataEvent {
-  session_id: string;
-  data: number[];
-}
-
 interface SshDisconnectEvent {
   session_id: string;
   reason: string;
 }
 
 export interface TerminalProps {
+  tabId: string;
   sessionId: string | null;
   isActive: boolean;
   mode?: "ssh" | "local";
@@ -37,6 +36,7 @@ export interface TerminalProps {
 }
 
 export function TerminalView({
+  tabId,
   sessionId,
   isActive,
   mode = "ssh",
@@ -99,13 +99,13 @@ export function TerminalView({
   // Refit when becoming active (delayed to let layout settle after sidebar unmount)
   useEffect(() => {
     if (!isActive || !fitAddonRef.current || !xtermRef.current) return;
-    const timer = window.setTimeout(() => {
+    const raf = requestAnimationFrame(() => {
       fitAddonRef.current?.fit();
       if (sessionId && xtermRef.current) {
         resizeSession(sessionId, xtermRef.current.cols, xtermRef.current.rows).catch((e) => logger.warn("resize failed:", e));
       }
-    }, 150);
-    return () => clearTimeout(timer);
+    });
+    return () => cancelAnimationFrame(raf);
   }, [isActive, sessionId, resizeSession]);
 
   useEffect(() => {
@@ -143,10 +143,12 @@ export function TerminalView({
     });
 
     const fitAddon = new FitAddon();
+    const serializeAddon = new SerializeAddon();
     const unicode11Addon = new Unicode11Addon();
     const webLinksAddon = new WebLinksAddon();
 
     xterm.loadAddon(fitAddon);
+    xterm.loadAddon(serializeAddon);
     xterm.loadAddon(unicode11Addon);
     xterm.loadAddon(webLinksAddon);
 
@@ -164,6 +166,8 @@ export function TerminalView({
 
     xtermRef.current = xterm;
     fitAddonRef.current = fitAddon;
+
+    registerTerminal(tabId, xterm, serializeAddon);
 
     if (isActiveRef.current) {
       fitAddon.fit();
@@ -203,17 +207,11 @@ export function TerminalView({
     if (sessionId) {
       const sid = sessionId;
       const currentMode = modeRef.current;
-      const dataEvent = currentMode === "local" ? "local_data" : "ssh_data";
       const disconnectEvent = currentMode === "local" ? "local_disconnect" : "ssh_disconnect";
 
-      unlistenPromises.push(
-        listen<SshDataEvent>(dataEvent, (event) => {
-          if (disposed) return;
-          if (event.payload.session_id === sid) {
-            xterm.write(new Uint8Array(event.payload.data));
-          }
-        })
-      );
+      attachConsumer(sid, (data) => {
+        if (!disposed) xterm.write(data);
+      });
 
       unlistenPromises.push(
         listen<SshDisconnectEvent>(disconnectEvent, (event) => {
@@ -246,9 +244,11 @@ export function TerminalView({
       disposed = true;
       clearTimeout(resizeTimer);
       resizeObserver.disconnect();
+      if (sessionId) detachConsumer(sessionId);
       Promise.all(unlistenPromises).then((fns) => {
         fns.forEach((fn) => fn());
       });
+      unregisterTerminal(tabId);
       xterm.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;

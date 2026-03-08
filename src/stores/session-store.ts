@@ -13,7 +13,7 @@ export interface SessionTab {
   sessionId: string | null;
   connectionId: string;
   title: string;
-  type: "terminal" | "local";
+  type: "terminal" | "local" | "log";
   status: ConnectionStatus;
   error: string | null;
   host: string;
@@ -21,6 +21,8 @@ export interface SessionTab {
   username: string;
   authType: "password" | "key";
   logs?: string[];
+  logId?: string;
+  logContent?: string;
 }
 
 interface SessionState {

@@ -82,6 +82,11 @@ pub fn run() {
             commands::local_terminal::local_resize,
             commands::local_terminal::local_close,
             commands::local_terminal::detect_shells,
+            commands::terminal_log::get_terminal_logs,
+            commands::terminal_log::get_terminal_log_content,
+            commands::terminal_log::save_terminal_log,
+            commands::terminal_log::delete_terminal_log,
+            commands::terminal_log::clear_terminal_logs,
         ])
         .run(tauri::generate_context!());
 

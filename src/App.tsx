@@ -7,19 +7,21 @@ import { CommandPalette } from "@/components/layout/CommandPalette";
 import { NavSidebar } from "@/components/layout/NavSidebar";
 import { SettingsDialog } from "@/components/layout/SettingsDialog";
 import { TitleBar } from "@/components/layout/TitleBar";
+import { LogsList } from "@/components/logs/LogsList";
+import { LogViewer } from "@/components/logs/LogViewer";
 import { SftpPage } from "@/components/sftp/SftpPage";
 import { SnippetDetail } from "@/components/snippet/SnippetDetail";
 import { SnippetList } from "@/components/snippet/SnippetList";
 import { TerminalView } from "@/components/terminal/Terminal";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useConnectionHandlers } from "@/hooks/use-connection";
@@ -31,6 +33,7 @@ import { useSessionStore } from "@/stores/session-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { isSnippetEmpty, useSnippetStore } from "@/stores/snippet-store";
 import { useUiStore } from "@/stores/ui-store";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -51,10 +54,14 @@ function App() {
   const pendingEditHostRef = useRef<string | null>(null);
 
   useEffect(() => {
-    useSettingsStore.getState().loadSettings();
-    useConnectionStore.getState().loadConnections();
-    useSnippetStore.getState().loadSnippets();
-    useKeychainStore.getState().loadItems();
+    Promise.all([
+      useSettingsStore.getState().loadSettings(),
+      useConnectionStore.getState().loadConnections(),
+      useSnippetStore.getState().loadSnippets(),
+      useKeychainStore.getState().loadItems(),
+    ]).finally(() => {
+      getCurrentWindow().show();
+    });
   }, []);
 
   const {
@@ -71,10 +78,10 @@ function App() {
   const isHome = activeTabId === null;
   const terminalTheme = getThemeById(terminalThemeId);
   const terminalBg = terminalTheme.colors.background as string;
-  const themeAccent = terminalTheme.colors.cursor as string;
+  const terminalFg = terminalTheme.colors.foreground as string;
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
-  const activeIsConnectedTerminal = activeTab?.status === "connected" && !!activeTab.sessionId;
+  const activeIsConnectedTerminal = activeTab?.type === "log" || (activeTab?.status === "connected" && !!activeTab.sessionId);
 
   const handleTryCloseHostDetail = useCallback(() => {
     const { editingHostId, setEditingHostId } = useUiStore.getState();
@@ -172,8 +179,7 @@ function App() {
           onCloseOtherTabs={handleCloseOtherTabs}
           onCloseAllTabs={handleCloseAllTabs}
           terminalBg={activeIsConnectedTerminal ? terminalBg : undefined}
-          themeAccent={themeAccent}
-          themeVariant={terminalTheme.variant}
+          terminalFg={activeIsConnectedTerminal ? terminalFg : undefined}
         />
 
         <div className="flex flex-1 min-h-0">
@@ -181,12 +187,12 @@ function App() {
 
           <main className="flex-1 min-w-0 relative">
             {isHome && activeView === "sftp" && (
-              <div className="h-full bg-content animate-in fade-in-0 duration-150">
+              <div className="h-full bg-content relative z-10 animate-in fade-in-0 duration-150">
                 <SftpPage />
               </div>
             )}
 
-            <div className={isHome && activeView !== "sftp" ? "h-full bg-content" : "hidden"}>
+            <div className={isHome && activeView !== "sftp" ? "h-full bg-content relative z-10" : "hidden"}>
               <div className="h-full" onClick={handleContentAreaClick}>
                 <div key={navPage} className="h-full animate-in fade-in-0 duration-150">
                 {navPage === "hosts" ? (
@@ -195,6 +201,8 @@ function App() {
                   <SnippetList />
                 ) : navPage === "keychain" ? (
                   <KeychainList />
+                ) : navPage === "logs" ? (
+                  <LogsList />
                 ) : (
                   <div className="flex h-full items-center justify-center text-muted-foreground">
                     <p className="text-sm">{navPage} — coming soon</p>
@@ -207,10 +215,19 @@ function App() {
             {tabs.map((tab) => {
               const isActive = tab.id === activeTabId;
 
+              if (tab.type === "log" && tab.logContent) {
+                return (
+                  <div key={tab.id} className={cn("absolute inset-0 animate-in fade-in-0 duration-150", !isActive && "invisible")}>
+                    <LogViewer content={tab.logContent} isActive={isActive} />
+                  </div>
+                );
+              }
+
               if (tab.status === "connected" && tab.sessionId) {
                 return (
                   <div key={tab.id} className={cn("absolute inset-0 animate-in fade-in-0 duration-150", !isActive && "invisible")}>
                     <TerminalView
+                      tabId={tab.id}
                       sessionId={tab.sessionId}
                       isActive={isActive}
                       mode={tab.type === "local" ? "local" : "ssh"}
