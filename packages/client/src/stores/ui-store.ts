@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type NavPage = "hosts" | "snippets" | "keychain" | "port-forwarding" | "known-hosts" | "logs";
-export type ActiveView = "home" | "sftp";
+export type ActiveView = "home" | "sftp" | "settings";
 export type ListLayout = "list" | "grid";
 
 export type DetailPanel =
@@ -33,6 +33,8 @@ interface UiState {
   settingsOpen: boolean;
   listLayout: ListLayout;
   keychainGenerateMode: boolean;
+  mobileNavOpen: boolean;
+  mobileShowSessions: boolean;
   setNavPage: (page: NavPage) => void;
   setActiveView: (view: ActiveView) => void;
   setSelectedHostId: (id: string | null) => void;
@@ -46,6 +48,8 @@ interface UiState {
   setSettingsOpen: (open: boolean) => void;
   setListLayout: (layout: ListLayout) => void;
   setKeychainGenerateMode: (mode: boolean) => void;
+  setMobileNavOpen: (open: boolean) => void;
+  setMobileShowSessions: (show: boolean) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -64,6 +68,8 @@ export const useUiStore = create<UiState>()(
       settingsOpen: false,
       listLayout: "grid",
       keychainGenerateMode: false,
+      mobileNavOpen: false,
+      mobileShowSessions: false,
 
       setNavPage: (page) => set({
         navPage: page,
@@ -94,6 +100,8 @@ export const useUiStore = create<UiState>()(
       setSettingsOpen: (open) => set({ settingsOpen: open }),
       setListLayout: (layout) => set({ listLayout: layout }),
       setKeychainGenerateMode: (mode) => set({ keychainGenerateMode: mode }),
+      setMobileNavOpen: (open) => set({ mobileNavOpen: open }),
+      setMobileShowSessions: (show) => set({ mobileShowSessions: show }),
     }),
     {
       name: "termix-ui",

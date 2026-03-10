@@ -1,4 +1,10 @@
 import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from "@/components/ui/dialog";
+import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
@@ -6,19 +12,17 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useContextMenu } from "@/hooks/use-context-menu";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useUpdateStore } from "@/hooks/use-updater";
 import { createLogger } from "@/lib/logger";
 import { terminalThemes } from "@/lib/terminal-themes";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
+import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow, type Window } from "@tauri-apps/api/window";
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
     Check,
     ExternalLink,
@@ -39,8 +43,6 @@ import {
     X,
     XCircle,
 } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { getVersion } from "@tauri-apps/api/app";
 import { useEffect, useRef, useState } from "react";
 
 const logger = createLogger("titlebar");
@@ -68,7 +70,7 @@ function getThemeClasses(inTerminal: boolean) {
     tabActive: "bg-[var(--tf-bg)] text-[var(--tf-bright)] font-semibold",
     tabInactive: "bg-[var(--tf-bg-dim)] text-[var(--tf-dim)] font-medium hover:bg-[var(--tf-bg)] hover:text-[var(--tf-hover)]",
     iconBtn: "h-7 w-7 text-[var(--tf-dim)] hover:text-[var(--tf)] hover:bg-[var(--tf-bg)]",
-    closeHover: "hover:bg-red-500/80 hover:text-white",
+    closeHover: "hover:bg-destructive hover:text-destructive-foreground",
     separator: "bg-[var(--tf-sep)]",
     tabClose: "hover:bg-[var(--tf-bg)]",
   };
@@ -85,8 +87,9 @@ interface TitleBarProps {
 
 export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, terminalBg, terminalFg }: TitleBarProps) {
   const { tabs, activeTabId, setActiveTab, updateTab } = useSessionStore();
-  const { activeView, setActiveView, setSelectedHostId, setEditingHostId, setSettingsOpen } = useUiStore();
+  const { activeView, setActiveView, setSelectedHostId, setEditingHostId, setSettingsOpen, setMobileNavOpen } = useUiStore();
   const { terminalThemeId, setTerminalThemeId } = useSettingsStore();
+  const isMobile = useIsMobile();
 
   const [tabMenuTarget, setTabMenuTarget] = useState<string | null>(null);
   const { menu, menuRef, open, close } = useContextMenu();
@@ -166,6 +169,39 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
     }
   };
 
+  const { navPage: currentNavPage, activeView: currentActiveView, mobileShowSessions } = useUiStore();
+
+  const getMobileTitle = () => {
+    if (mobileShowSessions) return "Connections";
+    if (currentActiveView === "settings") return "Settings";
+    const titles: Record<string, string> = {
+      hosts: "Hosts", snippets: "Snippets", keychain: "Keychain",
+      "port-forwarding": "Port Forwarding", "known-hosts": "Known Hosts", logs: "Logs",
+    };
+    return titles[currentNavPage] || "Home";
+  };
+
+  if (isMobile) {
+    const showMenuBtn = currentActiveView === "home" && !mobileShowSessions;
+    return (
+      <div className="flex h-12 shrink-0 items-center select-none border-b bg-background px-2">
+        {showMenuBtn ? (
+          <button
+            type="button"
+            className={cn("inline-flex items-center justify-center rounded-md h-8 w-8 shrink-0 transition-all text-muted-foreground hover:text-foreground hover:bg-accent active:bg-accent/80 active:scale-95", focusRing)}
+            onClick={() => setMobileNavOpen(true)}
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+        ) : (
+          <div className="w-8 shrink-0" />
+        )}
+        <h1 className="text-base font-semibold flex-1 text-center truncate">{getMobileTitle()}</h1>
+        <div className="w-8 shrink-0" />
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -185,30 +221,32 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
       onMouseDown={handleTitleBarMouseDown}
     >
       {/* Left: hamburger dropdown menu */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              "inline-flex items-center justify-center rounded-md mx-1.5 shrink-0 transition-colors",
-              styles.iconBtn, focusRing
-            )}
-          >
-            <Menu className="h-4 w-4" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-48">
-          <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
-            <Settings className="mr-2 h-4 w-4" />
-            Settings
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => setAboutOpen(true)}>
-            <Info className="mr-2 h-4 w-4" />
-            About Termix
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center shrink-0">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "inline-flex items-center justify-center rounded-md mx-1.5 shrink-0 transition-colors",
+                styles.iconBtn, focusRing
+              )}
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-48">
+            <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+              <Settings className="mr-2 h-4 w-4" />
+              Settings
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => setAboutOpen(true)}>
+              <Info className="mr-2 h-4 w-4" />
+              About Termix
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* Tabs area */}
       <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto px-1 py-1">
@@ -321,7 +359,7 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
             onMouseDown={(e) => e.stopPropagation()}
           >
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none"
               onClick={() => startRename(tabMenuTarget)}
             >
               <Pencil className="h-3.5 w-3.5" />
@@ -329,7 +367,7 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
             </button>
             <div className="my-1 h-px bg-border" />
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none"
               onClick={() => { onCloseTab(tabMenuTarget); close(); }}
             >
               <X className="h-3.5 w-3.5" />
@@ -338,14 +376,14 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
             {tabs.length > 1 && (
               <>
                 <button
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none"
                   onClick={() => { onCloseOtherTabs(tabMenuTarget); close(); }}
                 >
                   <XCircle className="h-3.5 w-3.5" />
                   Close Others
                 </button>
                 <button
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none"
                   onClick={() => { onCloseAllTabs(); close(); }}
                 >
                   <XCircle className="h-3.5 w-3.5" />
@@ -460,9 +498,29 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
                 <ExternalLink className="h-3 w-3" />
               </span>
             </div>
+            <CheckUpdateButton />
           </div>
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function CheckUpdateButton() {
+  const { status, checkForUpdate } = useUpdateStore();
+  const isChecking = status === "checking";
+
+  return (
+    <button
+      className="flex w-full items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-sm hover:bg-muted transition-colors cursor-pointer disabled:opacity-50"
+      onClick={checkForUpdate}
+      disabled={isChecking}
+    >
+      <span className="text-muted-foreground">Update</span>
+      <span className="flex items-center gap-1 text-xs">
+        {isChecking && <Loader2 className="h-3 w-3 animate-spin" />}
+        {status === "error" ? "Check failed" : status === "up-to-date" ? "Up to date" : isChecking ? "Checking..." : "Check for updates"}
+      </span>
+    </button>
   );
 }

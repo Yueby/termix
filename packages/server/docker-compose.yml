@@ -1,0 +1,15 @@
+services:
+  termix-server:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - termix-data:/app/data
+    environment:
+      - JWT_SECRET=change-me-in-production
+      - TURNSTILE_SECRET=
+      - PORT=3000
+    restart: unless-stopped
+
+volumes:
+  termix-data:

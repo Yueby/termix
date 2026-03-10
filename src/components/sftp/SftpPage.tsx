@@ -1,5 +1,7 @@
+import { useIsMobile } from "@/hooks/use-mobile";
 import { createLogger } from "@/lib/logger";
 import { executeDropTransfer } from "@/lib/transfer";
+import { cn } from "@/lib/utils";
 import { useSftpStore, type PanelSide } from "@/stores/sftp-store";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -10,7 +12,9 @@ const logger = createLogger("sftp-page");
 
 export function SftpPage() {
   const init = useSftpStore((s) => s.init);
+  const isMobile = useIsMobile();
   const [dragTarget, setDragTarget] = useState<PanelSide | null>(null);
+  const [activeSide, setActiveSide] = useState<PanelSide>("left");
   const leftRef = useRef<HTMLDivElement>(null);
   const rightRef = useRef<HTMLDivElement>(null);
 
@@ -76,6 +80,43 @@ export function SftpPage() {
     };
   }, [resolveSide]);
 
+  if (isMobile) {
+    return (
+      <div className="flex flex-col h-full">
+        <div className="flex shrink-0 border-b bg-card">
+          <button
+            className={cn(
+              "flex-1 py-2 text-xs font-medium transition-colors",
+              activeSide === "left"
+                ? "border-b-2 border-primary text-primary"
+                : "text-muted-foreground"
+            )}
+            onClick={() => setActiveSide("left")}
+          >
+            Left Panel
+          </button>
+          <button
+            className={cn(
+              "flex-1 py-2 text-xs font-medium transition-colors",
+              activeSide === "right"
+                ? "border-b-2 border-primary text-primary"
+                : "text-muted-foreground"
+            )}
+            onClick={() => setActiveSide("right")}
+          >
+            Right Panel
+          </button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <div ref={activeSide === "left" ? leftRef : rightRef} className="h-full">
+            <FilePanel side={activeSide} isDragOver={dragTarget === activeSide} />
+          </div>
+        </div>
+        <TransferBar />
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex flex-1 min-h-0">
@@ -90,4 +131,3 @@ export function SftpPage() {
     </div>
   );
 }
-

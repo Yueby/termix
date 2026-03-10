@@ -1,0 +1,12 @@
+name = "termix-server"
+main = "src/worker.ts"
+compatibility_date = "2024-12-01"
+
+# Secrets (set via `wrangler secret put`):
+#   JWT_SECRET
+#   TURNSTILE_SECRET
+
+[[d1_databases]]
+binding = "DB"
+database_name = "termix-db"
+database_id = ""
