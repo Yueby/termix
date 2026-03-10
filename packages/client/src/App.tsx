@@ -4,8 +4,10 @@ import { HostList } from "@/components/connection/HostList";
 import { KeychainDetail } from "@/components/keychain/KeychainDetail";
 import { KeychainList } from "@/components/keychain/KeychainList";
 import { CommandPalette } from "@/components/layout/CommandPalette";
+import { MobileSessionList } from "@/components/terminal/MobileSessionList";
+import { MobileTabBar } from "@/components/layout/MobileTabBar";
 import { NavSidebar } from "@/components/layout/NavSidebar";
-import { SettingsDialog } from "@/components/layout/SettingsDialog";
+import { MobileSettingsPage, SettingsDialog } from "@/components/layout/SettingsDialog";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { LogsList } from "@/components/logs/LogsList";
 import { LogViewer } from "@/components/logs/LogViewer";
@@ -13,6 +15,7 @@ import { SftpPage } from "@/components/sftp/SftpPage";
 import { SnippetDetail } from "@/components/snippet/SnippetDetail";
 import { SnippetList } from "@/components/snippet/SnippetList";
 import { TerminalView } from "@/components/terminal/Terminal";
+import { MobileTerminalHeader, MobileTerminalToolbar } from "@/components/terminal/MobileTerminalToolbar";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -33,11 +36,29 @@ import { useSessionStore } from "@/stores/session-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { isSnippetEmpty, useSnippetStore } from "@/stores/snippet-store";
 import { useUiStore } from "@/stores/ui-store";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { useUpdateStore } from "@/hooks/use-updater";
+import { focusTerminal, pasteToTerminal } from "@/lib/terminal-registry";
+import { localWrite, sshWrite } from "@/lib/tauri";
+import { readText as clipboardRead } from "@tauri-apps/plugin-clipboard-manager";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Loader2 } from "lucide-react";
+import { Download, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-function SlidingPanel({ open, children }: { open: boolean; children: React.ReactNode }) {
+function SlidingPanel({ open, children, onClose }: { open: boolean; children: React.ReactNode; onClose?: () => void }) {
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <Sheet open={open} onOpenChange={(v) => { if (!v) onClose?.(); }}>
+        <SheetContent side="right" showCloseButton={false} className="w-full sm:w-80 p-0">
+          <div className="h-full">{children}</div>
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
   return (
     <div className={cn("shrink-0 h-full overflow-hidden transition-[width] duration-300 ease-in-out", open ? "w-80 border-l" : "w-0")}>
       <div className="w-80 h-full">{children}</div>
@@ -47,11 +68,13 @@ function SlidingPanel({ open, children }: { open: boolean; children: React.React
 
 function App() {
   const { tabs, activeTabId } = useSessionStore();
-  const { navPage, activeView, detailPanel, settingsOpen, setSettingsOpen } = useUiStore();
+  const { navPage, activeView, detailPanel, settingsOpen, setSettingsOpen, mobileShowSessions } = useUiStore();
   const { terminalThemeId } = useSettingsStore();
 
   const [showHostDiscard, setShowHostDiscard] = useState(false);
   const pendingEditHostRef = useRef<string | null>(null);
+
+  const { status: updateStatus, update, progress: updateProgress, downloadAndInstall, dismiss: dismissUpdate } = useUpdateStore();
 
   useEffect(() => {
     Promise.all([
@@ -61,6 +84,7 @@ function App() {
       useKeychainStore.getState().loadItems(),
     ]).finally(() => {
       getCurrentWindow().show();
+      setTimeout(() => useUpdateStore.getState().checkForUpdate(), 3000);
     });
   }, []);
 
@@ -79,6 +103,8 @@ function App() {
   const terminalTheme = getThemeById(terminalThemeId);
   const terminalBg = terminalTheme.colors.background as string;
   const terminalFg = terminalTheme.colors.foreground as string;
+
+  const isMobile = useIsMobile();
 
   const activeTab = tabs.find((t) => t.id === activeTabId);
   const activeIsConnectedTerminal = activeTab?.type === "log" || (activeTab?.status === "connected" && !!activeTab.sessionId);
@@ -174,16 +200,18 @@ function App() {
         className="flex h-screen flex-col overflow-hidden select-none text-foreground bg-background"
         style={activeIsConnectedTerminal ? { backgroundColor: terminalBg } : undefined}
       >
-        <TitleBar
-          onCloseTab={handleCloseTab}
-          onCloseOtherTabs={handleCloseOtherTabs}
-          onCloseAllTabs={handleCloseAllTabs}
-          terminalBg={activeIsConnectedTerminal ? terminalBg : undefined}
-          terminalFg={activeIsConnectedTerminal ? terminalFg : undefined}
-        />
+        {!(isMobile && activeIsConnectedTerminal) && (
+          <TitleBar
+            onCloseTab={handleCloseTab}
+            onCloseOtherTabs={handleCloseOtherTabs}
+            onCloseAllTabs={handleCloseAllTabs}
+            terminalBg={activeIsConnectedTerminal ? terminalBg : undefined}
+            terminalFg={activeIsConnectedTerminal ? terminalFg : undefined}
+          />
+        )}
 
         <div className="flex flex-1 min-h-0">
-          {isHome && activeView !== "sftp" && <NavSidebar />}
+          {(isMobile || (isHome && activeView !== "sftp")) && <NavSidebar />}
 
           <main className="flex-1 min-w-0 relative">
             {isHome && activeView === "sftp" && (
@@ -192,7 +220,19 @@ function App() {
               </div>
             )}
 
-            <div className={isHome && activeView !== "sftp" ? "h-full bg-content relative z-10" : "hidden"}>
+            {isHome && activeView === "settings" && isMobile && (
+              <div className="h-full bg-content relative z-10 animate-in fade-in-0 duration-150">
+                <MobileSettingsPage />
+              </div>
+            )}
+
+            {isMobile && mobileShowSessions && isHome && activeView === "home" && (
+              <div className="h-full bg-content relative z-10 animate-in fade-in-0 duration-150">
+                <MobileSessionList onCloseTab={handleCloseTab} />
+              </div>
+            )}
+
+            <div className={isHome && activeView === "home" && !(isMobile && mobileShowSessions) ? "h-full bg-content relative z-10" : "hidden"}>
               <div className="h-full" onClick={handleContentAreaClick}>
                 <div key={navPage} className="h-full animate-in fade-in-0 duration-150">
                 {navPage === "hosts" ? (
@@ -226,13 +266,51 @@ function App() {
               if (tab.status === "connected" && tab.sessionId) {
                 return (
                   <div key={tab.id} className={cn("absolute inset-0 animate-in fade-in-0 duration-150", !isActive && "invisible")}>
-                    <TerminalView
-                      tabId={tab.id}
-                      sessionId={tab.sessionId}
-                      isActive={isActive}
-                      mode={tab.type === "local" ? "local" : "ssh"}
-                      onDisconnect={handleDisconnect}
-                    />
+                    {isMobile ? (
+                      <div className="flex flex-col h-full">
+                        <MobileTerminalHeader
+                          title={tab.title}
+                          onBack={() => {
+                            useSessionStore.getState().setActiveTab(null);
+                          }}
+                          terminalBg={terminalBg}
+                          terminalFg={terminalFg}
+                        />
+                        <div className="flex-1 min-h-0">
+                          <TerminalView
+                            tabId={tab.id}
+                            sessionId={tab.sessionId}
+                            isActive={isActive}
+                            mode={tab.type === "local" ? "local" : "ssh"}
+                            onDisconnect={handleDisconnect}
+                          />
+                        </div>
+                        <MobileTerminalToolbar
+                          onSendKey={(data) => {
+                            const bytes = Array.from(new TextEncoder().encode(data));
+                            const write = tab.type === "local" ? localWrite : sshWrite;
+                            write(tab.sessionId!, bytes).catch(() => {});
+                          }}
+                          onToggleKeyboard={() => focusTerminal(tab.id)}
+                          onPaste={() => {
+                            clipboardRead().then((text) => {
+                              if (text) {
+                                pasteToTerminal(tab.id, text);
+                                focusTerminal(tab.id);
+                              }
+                            }).catch((e) => console.warn("clipboard read failed:", e));
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <TerminalView
+                        tabId={tab.id}
+                        sessionId={tab.sessionId}
+                        isActive={isActive}
+                        mode={tab.type === "local" ? "local" : "ssh"}
+                        onDisconnect={handleDisconnect}
+                      />
+                    )}
                   </div>
                 );
               }
@@ -268,7 +346,14 @@ function App() {
             })}
           </main>
 
-          <SlidingPanel open={!!detailPanel}>
+          <SlidingPanel
+            open={!!detailPanel}
+            onClose={() => {
+              if (detailPanel?.type === "host") handleTryCloseHostDetail();
+              else if (detailPanel?.type === "snippet") handleTryCloseSnippetDetail();
+              else if (detailPanel?.type === "keychain") handleTryCloseKeychainDetail();
+            }}
+          >
             {detailPanel?.type === "host" && (
               <HostDetail onConnect={handleConnect} onClose={handleTryCloseHostDetail} />
             )}
@@ -280,6 +365,8 @@ function App() {
             )}
           </SlidingPanel>
         </div>
+
+        {isMobile && !activeIsConnectedTerminal && <MobileTabBar />}
 
         <CommandPalette onConnect={handleConnect} />
         <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
@@ -298,6 +385,65 @@ function App() {
             <AlertDialogFooter>
               <AlertDialogCancel>Continue editing</AlertDialogCancel>
               <AlertDialogAction onClick={handleDiscardHost}>Discard</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={updateStatus === "available"} onOpenChange={(open) => { if (!open) dismissUpdate(); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Update Available</AlertDialogTitle>
+              <AlertDialogDescription>
+                A new version <span className="font-semibold text-foreground">v{update?.version}</span> is available.
+                {update?.body && <span className="block mt-1 text-xs">{update.body}</span>}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Later</AlertDialogCancel>
+              <AlertDialogAction onClick={downloadAndInstall}>
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                Update Now
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={updateStatus === "downloading" || updateStatus === "installing"}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {updateStatus === "installing" ? "Installing Update..." : "Downloading Update..."}
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
+                    <span>{updateStatus === "installing" ? "Installing, app will restart..." : "Downloading update..."}</span>
+                  </div>
+                  {updateProgress && updateProgress.total > 0 && (
+                    <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-primary h-full transition-[width] duration-300"
+                        style={{ width: `${Math.min(100, (updateProgress.downloaded / updateProgress.total) * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={updateStatus === "error"} onOpenChange={(open) => { if (!open) dismissUpdate(); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Update Check Failed</AlertDialogTitle>
+              <AlertDialogDescription>
+                {useUpdateStore.getState().error || "An unknown error occurred while checking for updates."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>OK</AlertDialogCancel>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

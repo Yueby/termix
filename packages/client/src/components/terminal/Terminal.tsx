@@ -387,7 +387,7 @@ export function TerminalView({
 
       {/* Add to Snippets dialog */}
       {snippetDialog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/50">
           <div className="w-[400px] rounded-lg border bg-popover p-4 shadow-lg text-popover-foreground animate-in fade-in-0 zoom-in-95 duration-150">
             <h3 className="text-sm font-medium mb-3">Add to Snippets</h3>
             <div className="space-y-3">
@@ -413,13 +413,13 @@ export function TerminalView({
               </div>
               <div className="flex justify-end gap-2 pt-1">
                 <button
-                  className="rounded-md px-3 py-1.5 text-xs border hover:bg-accent transition-colors"
+                  className="rounded-md px-3 py-1.5 text-xs border hover:bg-accent active:bg-accent/80 active:scale-95 transition-all"
                   onClick={() => setSnippetDialog(null)}
                 >
                   Cancel
                 </button>
                 <button
-                  className="rounded-md px-3 py-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  className="rounded-md px-3 py-1.5 text-xs bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80 active:scale-95 transition-all"
                   onClick={handleSaveSnippet}
                 >
                   Save
@@ -439,7 +439,7 @@ export function TerminalView({
             style={{ visibility: "hidden" }}
           >
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none disabled:opacity-50 disabled:pointer-events-none"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none disabled:opacity-50 disabled:pointer-events-none"
               disabled={!hasSelection}
               onClick={handleCopy}
             >
@@ -447,14 +447,14 @@ export function TerminalView({
               Copy
             </button>
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none"
               onClick={handlePaste}
             >
               <ClipboardPaste className="h-3.5 w-3.5" />
               Paste
             </button>
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none"
               onClick={handleSelectAll}
             >
               <TextSelect className="h-3.5 w-3.5" />
@@ -462,7 +462,7 @@ export function TerminalView({
             </button>
             <div className="my-1 h-px bg-border" />
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none disabled:opacity-50 disabled:pointer-events-none"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none disabled:opacity-50 disabled:pointer-events-none"
               disabled={!hasSelection}
               onClick={handleAddToSnippets}
             >
@@ -471,7 +471,7 @@ export function TerminalView({
             </button>
             <div className="my-1 h-px bg-border" />
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground outline-none"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground active:bg-accent/80 outline-none"
               onClick={handleClearTerminal}
             >
               <Eraser className="h-3.5 w-3.5" />

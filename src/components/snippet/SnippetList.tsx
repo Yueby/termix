@@ -1,8 +1,8 @@
 import { ListPage } from "@/components/layout/ListPage";
 import { Button } from "@/components/ui/button";
+import { useContextMenu } from "@/hooks/use-context-menu";
 import { createLogger } from "@/lib/logger";
 import { cn } from "@/lib/utils";
-import { useContextMenu } from "@/hooks/use-context-menu";
 import { isSnippetEmpty, useSnippetStore, type Snippet } from "@/stores/snippet-store";
 import { useUiStore } from "@/stores/ui-store";
 import { Code2, Copy, Pencil, Plus, Trash2 } from "lucide-react";
@@ -87,8 +87,8 @@ export function SnippetList() {
             className={cn(
               "group flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
               selectedSnippetId === snippet.id
-                ? "border-primary/40 bg-muted/30 hover:bg-accent/50"
-                : "border-transparent bg-muted/30 hover:bg-accent/50"
+                ? "border-primary/40 bg-muted/30 hover:bg-accent/50 active:bg-accent/40"
+                : "border-transparent bg-muted/30 hover:bg-accent/50 active:bg-accent/40"
             )}
             onClick={() => setSelectedSnippetId(selectedSnippetId === snippet.id ? null : snippet.id)}
             onDoubleClick={() => switchEditingSnippet(snippet.id)}
@@ -143,19 +143,19 @@ export function SnippetList() {
             onMouseDown={(e) => e.stopPropagation()}
           >
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground active:bg-accent/80 transition-colors"
               onClick={() => { handleCopy(menuTarget.content); close(); }}
             >
               <Copy className="h-4 w-4 text-muted-foreground" /> Copy
             </button>
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground transition-colors"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground active:bg-accent/80 transition-colors"
               onClick={() => { switchEditingSnippet(menuTarget.id); close(); }}
             >
               <Pencil className="h-4 w-4 text-muted-foreground" /> Edit
             </button>
             <button
-              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 hover:text-destructive transition-colors"
+              className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-destructive hover:bg-destructive/10 hover:text-destructive active:bg-destructive/20 transition-colors"
               onClick={() => { setDeleteTarget(menuTarget.id); close(); }}
             >
               <Trash2 className="h-4 w-4" /> Delete
