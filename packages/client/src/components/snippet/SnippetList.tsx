@@ -80,36 +80,41 @@ export function SnippetList() {
         emptyText="No matching snippets"
         noItemsText="No snippets yet"
         renderItem={(snippet: Snippet) => (
-          <button
+          <div
             key={snippet.id}
-            className={cn(
-              "group flex w-full items-center gap-3 rounded-lg border-2 px-3 py-2.5 text-left transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
-              selectedSnippetId === snippet.id
-                ? "border-primary/40 bg-muted/30 hover:bg-accent/50 active:bg-accent/40"
-                : "border-transparent bg-muted/30 hover:bg-accent/50 active:bg-accent/40"
-            )}
-            onClick={() => setSelectedSnippetId(selectedSnippetId === snippet.id ? null : snippet.id)}
-            onDoubleClick={() => switchEditingSnippet(snippet.id)}
+            className="group relative w-full"
             onContextMenu={(e) => {
               setMenuTarget(snippet);
               open(e);
             }}
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
-              <Code2 className="h-4 w-4" />
-            </div>
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="text-sm font-medium truncate">
-                {snippet.name || snippet.content || "Empty"}
-              </span>
-              <span className="text-xs text-muted-foreground truncate font-mono">
-                {snippet.content || "Empty"}
-              </span>
-            </div>
+            <button
+              type="button"
+              className={cn(
+                "flex w-full items-center gap-3 rounded-lg border-2 pl-3 pr-12 py-2.5 text-left transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
+                selectedSnippetId === snippet.id
+                  ? "border-primary/40 bg-muted/30 hover:bg-accent/50 active:bg-accent/40"
+                  : "border-transparent bg-muted/30 hover:bg-accent/50 active:bg-accent/40"
+              )}
+              onClick={() => setSelectedSnippetId(selectedSnippetId === snippet.id ? null : snippet.id)}
+              onDoubleClick={() => switchEditingSnippet(snippet.id)}
+            >
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0">
+                <Code2 className="h-4 w-4" />
+              </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <span className="text-sm font-medium truncate">
+                  {snippet.name || snippet.content || "Empty"}
+                </span>
+                <span className="text-xs text-muted-foreground truncate font-mono">
+                  {snippet.content || "Empty"}
+                </span>
+              </div>
+            </button>
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
               onClick={(e) => {
                 e.stopPropagation();
                 switchEditingSnippet(snippet.id);
@@ -117,7 +122,7 @@ export function SnippetList() {
             >
               <Pencil className="h-3.5 w-3.5" />
             </Button>
-          </button>
+          </div>
         )}
         deleteOpen={!!deleteTarget}
         onDeleteOpenChange={(open) => !open && setDeleteTarget(null)}
