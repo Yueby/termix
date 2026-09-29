@@ -4,6 +4,8 @@
   "scripts": {
     "dev": "pnpm --filter @termix/client dev",
     "build": "pnpm --filter @termix/client build",
+    "bump": "node scripts/bump-version.mjs",
+    "bump:check": "node scripts/bump-version.mjs --check",
     "tauri": "pnpm --filter @termix/client tauri"
   }
 }
