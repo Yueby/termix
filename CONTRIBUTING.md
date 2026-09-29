@@ -169,13 +169,6 @@ the release sits as a draft, no installed client can see it — which is the poi
 gives you a window to check the build before anyone is offered it. The update reaches
 users the moment you publish.
 
-### If the notes come out wrong
-
-Run the **Regenerate release notes** workflow from the Actions tab. It regenerates the
-notes for the latest tag and updates the release, rebuilding nothing. It reads
-`.github/cliff.toml` from the default branch rather than from the tag, so a fix to the
-parsers also applies to tags cut before it — which is exactly the case for v0.1.0.
-
 ## Platform support
 
 Windows, macOS and Linux are supported and built by CI. Android is **not** supported:
