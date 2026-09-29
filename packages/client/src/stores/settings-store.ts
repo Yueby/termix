@@ -6,11 +6,12 @@ import {
     type AppSettings,
     type ProxyConfig,
     type ProxyMode,
+    type SyncBackend,
 } from "@/lib/tauri";
 import { getThemeById } from "@/lib/terminal-themes";
 import { create } from "zustand";
 
-export type { AppSettings } from "@/lib/tauri";
+export type { AppSettings, SyncBackend } from "@/lib/tauri";
 
 const logger = createLogger("settings-store");
 
@@ -32,10 +33,14 @@ interface SettingsState {
   scrollBack: number;
   terminalThemeId: string;
   defaultShell: string;
+  syncBackend: SyncBackend;
   webdavUrl: string;
   webdavUsername: string;
   webdavPassword: string;
   webdavRemoteDir: string;
+  serverUrl: string;
+  serverToken: string;
+  vaultVersion: number;
   syncEncryptionPassword: string;
   /** Retry an SSH session automatically when it drops unexpectedly. */
   autoReconnect: boolean;
@@ -53,10 +58,13 @@ interface SettingsState {
   setScrollBack: (scrollBack: number) => void;
   setTerminalThemeId: (id: string) => void;
   setDefaultShell: (shell: string) => void;
+  setSyncBackend: (backend: SyncBackend) => void;
   setWebdavUrl: (url: string) => void;
   setWebdavUsername: (username: string) => void;
   setWebdavPassword: (password: string) => void;
   setWebdavRemoteDir: (dir: string) => void;
+  setServerUrl: (url: string) => void;
+  setServerToken: (token: string) => void;
   setSyncEncryptionPassword: (password: string) => void;
   setProxy: (proxy: ProxyMode) => void;
   setAutoReconnect: (enabled: boolean) => void;
@@ -77,10 +85,14 @@ function persistToBackend(getState: () => SettingsState) {
       scrollBack: state.scrollBack,
       terminalThemeId: state.terminalThemeId,
       defaultShell: state.defaultShell,
+      syncBackend: state.syncBackend,
       webdavUrl: state.webdavUrl,
       webdavUsername: state.webdavUsername,
       webdavPassword: state.webdavPassword,
       webdavRemoteDir: state.webdavRemoteDir,
+      serverUrl: state.serverUrl,
+      serverToken: state.serverToken,
+      vaultVersion: state.vaultVersion,
       syncEncryptionPassword: state.syncEncryptionPassword,
       autoReconnect: state.autoReconnect,
       proxy: state.proxy,
@@ -120,10 +132,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   scrollBack: 10000,
   terminalThemeId: "default-dark",
   defaultShell: "auto",
+  syncBackend: "none" as SyncBackend,
   webdavUrl: "",
   webdavUsername: "",
   webdavPassword: "",
   webdavRemoteDir: "/termix",
+  serverUrl: "",
+  serverToken: "",
+  vaultVersion: 0,
   syncEncryptionPassword: "",
   autoReconnect: true,
   proxy: { mode: "direct" },
@@ -144,10 +160,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         scrollBack: s.scrollBack || 10000,
         terminalThemeId: s.terminalThemeId || "default-dark",
         defaultShell: s.defaultShell || "auto",
+        syncBackend: (s.syncBackend as SyncBackend) || "none",
         webdavUrl: s.webdavUrl || "",
         webdavUsername: s.webdavUsername || "",
         webdavPassword: s.webdavPassword || "",
         webdavRemoteDir: s.webdavRemoteDir || "/termix",
+        serverUrl: s.serverUrl || "",
+        serverToken: s.serverToken || "",
+        vaultVersion: s.vaultVersion ?? 0,
         syncEncryptionPassword: s.syncEncryptionPassword || "",
         autoReconnect: s.autoReconnect ?? true,
         proxy: s.proxy ?? { mode: "direct" },
@@ -219,6 +239,10 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
     set({ defaultShell: shell });
     persistToBackend(get);
   },
+  setSyncBackend: (syncBackend) => {
+    set({ syncBackend });
+    persistToBackend(get);
+  },
   setWebdavUrl: (url) => {
     set({ webdavUrl: url });
     persistToBackend(get);
@@ -233,6 +257,14 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   },
   setWebdavRemoteDir: (dir) => {
     set({ webdavRemoteDir: dir });
+    persistToBackend(get);
+  },
+  setServerUrl: (url) => {
+    set({ serverUrl: url });
+    persistToBackend(get);
+  },
+  setServerToken: (token) => {
+    set({ serverToken: token });
     persistToBackend(get);
   },
   setSyncEncryptionPassword: (password) => {

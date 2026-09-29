@@ -188,6 +188,8 @@ export const deleteConnection = (id: string) =>
   invoke<void>("delete_connection", { id });
 
 // Settings CRUD
+export type SyncBackend = "none" | "webdav" | "termix";
+
 export interface AppSettings {
   theme: string;
   fontFamily: string;
@@ -196,10 +198,16 @@ export interface AppSettings {
   scrollBack: number;
   terminalThemeId: string;
   defaultShell: string;
+  syncBackend: SyncBackend;
+  // WebDAV sync
   webdavUrl: string;
   webdavUsername: string;
   webdavPassword: string;
   webdavRemoteDir: string;
+  // A self-deployed Termix server
+  serverUrl: string;
+  serverToken: string;
+  vaultVersion: number;
   syncEncryptionPassword: string;
   /** Retry an SSH session automatically when it drops unexpectedly. */
   autoReconnect: boolean;

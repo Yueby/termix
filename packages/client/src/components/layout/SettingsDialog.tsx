@@ -24,6 +24,7 @@ import {
     syncTestConnection,
     type ProxyKind,
     type ShellProfile,
+    type SyncBackend,
 } from "@/lib/tauri";
 import { terminalThemes } from "@/lib/terminal-themes";
 import { cn } from "@/lib/utils";
@@ -32,7 +33,7 @@ import { useKeychainStore } from "@/stores/keychain-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSnippetStore } from "@/stores/snippet-store";
 import { useUpdateStore } from "@/hooks/use-updater";
-import { ArrowLeft, CheckCircle2, ChevronRight, Cloud, ExternalLink, Globe, Info, Loader2, RefreshCw, Settings, Terminal, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronRight, Cloud, ExternalLink, Eye, EyeOff, Globe, Info, Loader2, RefreshCw, Settings, Terminal, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const logger = createLogger("settings");
@@ -66,10 +67,12 @@ function SettingRow({ label, description, children }: { label: string; descripti
 function useSettingsLogic(active: boolean) {
   const {
     theme, fontFamily, fontSize, cursorStyle, terminalThemeId, defaultShell,
-    webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir, syncEncryptionPassword,
+    syncBackend, webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir,
+    serverUrl, serverToken, vaultVersion, syncEncryptionPassword,
     proxy, systemProxy, autoReconnect,
     setTheme, setFontFamily, setFontSize, setCursorStyle, setTerminalThemeId, setDefaultShell,
-    setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir, setSyncEncryptionPassword,
+    setSyncBackend, setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir,
+    setServerUrl, setServerToken, setSyncEncryptionPassword,
     setProxy, refreshSystemProxy, setAutoReconnect,
   } = useSettingsStore();
 
@@ -110,6 +113,7 @@ function useSettingsLogic(active: boolean) {
     setSyncMessage(null);
     try {
       const msg = await syncPush();
+      await useSettingsStore.getState().loadSettings();
       setSyncMessage({ type: "success", text: msg });
     } catch (e) {
       setSyncMessage({ type: "error", text: String(e) });
@@ -139,11 +143,13 @@ function useSettingsLogic(active: boolean) {
 
   return {
     theme, fontFamily, fontSize, cursorStyle, terminalThemeId, defaultShell,
-    webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir, syncEncryptionPassword,
+    syncBackend, webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir,
+    serverUrl, serverToken, vaultVersion, syncEncryptionPassword,
     proxy, systemProxy, setProxy, refreshSystemProxy,
     autoReconnect, setAutoReconnect,
     setTheme, setFontFamily, setFontSize, setCursorStyle, setTerminalThemeId, setDefaultShell,
-    setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir, setSyncEncryptionPassword,
+    setSyncBackend, setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir,
+    setServerUrl, setServerToken, setSyncEncryptionPassword,
     activeNav, setActiveNav, shells, syncStatus, syncMessage,
     handleTest, handlePush, handlePull,
     isBusy: syncStatus !== "idle",
@@ -173,6 +179,15 @@ function SettingsNav({ activeNav, onNavChange }: { activeNav: NavId; onNavChange
 }
 
 function SettingsBody({ s }: { s: ReturnType<typeof useSettingsLogic> }) {
+  const [showServerToken, setShowServerToken] = useState(false);
+  const isSyncConfigured =
+    s.syncBackend === "webdav"
+      ? Boolean(s.webdavUrl)
+      : s.syncBackend === "termix"
+      ? Boolean(s.serverUrl)
+      : false;
+  const isActionDisabled = s.isBusy || !isSyncConfigured;
+
   return (
     <>
       {s.activeNav === "general" && (
@@ -400,44 +415,180 @@ function SettingsBody({ s }: { s: ReturnType<typeof useSettingsLogic> }) {
       {s.activeNav === "sync" && (
         <div className="space-y-4">
           <h3 className="text-sm font-medium mb-4">Cloud Sync</h3>
-          <div className="space-y-3">
-            <SettingRow label="WebDAV URL">
-              <Input className="w-full sm:w-[260px]" placeholder="https://dav.example.com" value={s.webdavUrl} onChange={(e) => s.setWebdavUrl(e.target.value)} />
-            </SettingRow>
-            <SettingRow label="Username">
-              <Input className="w-full sm:w-[200px]" value={s.webdavUsername} onChange={(e) => s.setWebdavUsername(e.target.value)} />
-            </SettingRow>
-            <SettingRow label="Password">
-              <Input className="w-full sm:w-[200px]" type="password" value={s.webdavPassword} onChange={(e) => s.setWebdavPassword(e.target.value)} />
-            </SettingRow>
-            <SettingRow label="Remote Dir">
-              <Input className="w-full sm:w-[200px]" placeholder="/termix" value={s.webdavRemoteDir} onChange={(e) => s.setWebdavRemoteDir(e.target.value)} />
-            </SettingRow>
-            <SettingRow label="Encryption Key">
-              <Input className="w-full sm:w-[200px]" type="password" placeholder="For cross-device sync" value={s.syncEncryptionPassword} onChange={(e) => s.setSyncEncryptionPassword(e.target.value)} />
-            </SettingRow>
-          </div>
+
+          <SettingRow label="Sync Backend">
+            <Select
+              value={s.syncBackend}
+              onValueChange={(val) => s.setSyncBackend(val as SyncBackend)}
+            >
+              <SelectTrigger className="w-full sm:w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Off (local only)</SelectItem>
+                <SelectItem value="webdav">WebDAV</SelectItem>
+                <SelectItem value="termix">Self-hosted server</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingRow>
+
+          {s.syncBackend === "none" && (
+            <p className="text-xs text-muted-foreground pt-1">
+              All connections, keys, and snippets are stored locally on this device only.
+            </p>
+          )}
+
+          {s.syncBackend === "webdav" && (
+            <div className="space-y-3">
+              <SettingRow label="WebDAV URL">
+                <Input
+                  className="w-full sm:w-[260px]"
+                  placeholder="https://dav.example.com"
+                  value={s.webdavUrl}
+                  onChange={(e) => s.setWebdavUrl(e.target.value)}
+                />
+              </SettingRow>
+              <SettingRow label="Username">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  value={s.webdavUsername}
+                  onChange={(e) => s.setWebdavUsername(e.target.value)}
+                />
+              </SettingRow>
+              <SettingRow label="Password">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  type="password"
+                  value={s.webdavPassword}
+                  onChange={(e) => s.setWebdavPassword(e.target.value)}
+                />
+              </SettingRow>
+              <SettingRow label="Remote Dir">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  placeholder="/termix"
+                  value={s.webdavRemoteDir}
+                  onChange={(e) => s.setWebdavRemoteDir(e.target.value)}
+                />
+              </SettingRow>
+              <SettingRow label="Encryption Key">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  type="password"
+                  placeholder="For cross-device sync"
+                  value={s.syncEncryptionPassword}
+                  onChange={(e) => s.setSyncEncryptionPassword(e.target.value)}
+                />
+              </SettingRow>
+            </div>
+          )}
+
+          {s.syncBackend === "termix" && (
+            <div className="space-y-3">
+              <SettingRow label="Server URL">
+                <Input
+                  className="w-full sm:w-[260px]"
+                  placeholder="https://termix.example.com"
+                  value={s.serverUrl}
+                  onChange={(e) => s.setServerUrl(e.target.value)}
+                />
+              </SettingRow>
+              <SettingRow label="Server Token">
+                <div className="relative w-full sm:w-[260px]">
+                  <Input
+                    className="w-full pr-8 font-mono text-xs"
+                    type={showServerToken ? "text" : "password"}
+                    placeholder="Shared secret token"
+                    value={s.serverToken}
+                    onChange={(e) => s.setServerToken(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => setShowServerToken(!showServerToken)}
+                    tabIndex={-1}
+                    aria-label={showServerToken ? "Hide token" : "Show token"}
+                  >
+                    {showServerToken ? (
+                      <EyeOff className="h-3.5 w-3.5" />
+                    ) : (
+                      <Eye className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </div>
+              </SettingRow>
+              <p className="text-xs text-muted-foreground">
+                Must match <code className="font-mono text-foreground">TERMIX_TOKEN</code> on your deployment. Generate one with <code className="font-mono text-foreground">openssl rand -hex 32</code>.
+              </p>
+              <SettingRow label="Encryption Key">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  type="password"
+                  placeholder="For cross-device sync"
+                  value={s.syncEncryptionPassword}
+                  onChange={(e) => s.setSyncEncryptionPassword(e.target.value)}
+                />
+              </SettingRow>
+              <SettingRow label="Vault Version">
+                <span className="text-xs font-mono text-muted-foreground">
+                  {s.vaultVersion > 0 ? `Version ${s.vaultVersion}` : "Not synced yet"}
+                </span>
+              </SettingRow>
+            </div>
+          )}
 
           <div className="flex items-center gap-2 pt-2">
-            <Button variant="outline" size="sm" disabled={s.isBusy || !s.webdavUrl} onClick={s.handleTest}>
-              {s.syncStatus === "testing" && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isActionDisabled}
+              onClick={s.handleTest}
+            >
+              {s.syncStatus === "testing" && (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
               Test
             </Button>
-            <Button variant="outline" size="sm" disabled={s.isBusy || !s.webdavUrl} onClick={s.handlePush}>
-              {s.syncStatus === "pushing" && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isActionDisabled}
+              onClick={s.handlePush}
+            >
+              {s.syncStatus === "pushing" && (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
               Push
             </Button>
-            <Button variant="outline" size="sm" disabled={s.isBusy || !s.webdavUrl} onClick={s.handlePull}>
-              {s.syncStatus === "pulling" && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isActionDisabled}
+              onClick={s.handlePull}
+            >
+              {s.syncStatus === "pulling" && (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
               <RefreshCw className="mr-1.5 h-3.5 w-3.5 scale-x-[-1]" />
               Pull
             </Button>
           </div>
 
           {s.syncMessage && (
-            <div className={cn("flex items-center gap-2 text-sm", s.syncMessage.type === "success" ? "text-success" : "text-destructive")}>
-              {s.syncMessage.type === "success" ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <XCircle className="h-4 w-4 shrink-0" />}
+            <div
+              className={cn(
+                "flex items-center gap-2 text-sm",
+                s.syncMessage.type === "success"
+                  ? "text-success"
+                  : "text-destructive"
+              )}
+            >
+              {s.syncMessage.type === "success" ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0" />
+              ) : (
+                <XCircle className="h-4 w-4 shrink-0" />
+              )}
               <span className="break-all">{s.syncMessage.text}</span>
             </div>
           )}
