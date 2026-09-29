@@ -3,10 +3,15 @@ import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { schema } from "../db";
-import { requireAuth, signAccessToken, signRefreshToken, verifyToken } from "../middleware/auth";
+import { requireAuth, REFRESH_AUDIENCE, signAccessToken, signRefreshToken, verifyToken } from "../middleware/auth";
 import { verifyTurnstile } from "../middleware/turnstile";
 import type { AppEnv } from "../types";
-import { timingSafeEqualHex, verifyWithAlgorithm, type HashAlgorithm } from "../utils/crypto";
+import {
+  timingSafeEqualHex,
+  verifyWithAlgorithm,
+  type HashAlgorithm,
+  type PasswordHasher,
+} from "../utils/crypto";
 import { generateId } from "../utils/id";
 
 const REFRESH_TOKEN_DAYS = 30;
@@ -27,6 +32,26 @@ const loginSchema = z.object({
 const refreshSchema = z.object({
   refreshToken: z.string(),
 });
+
+/**
+ * A password hash that never matches, used to keep the login path doing the same work
+ * whether or not the account exists.
+ *
+ * It has to be a real hash produced by the active hasher. The previous constant,
+ * `"$dummy$"`, was not: argon2 returns immediately for an unrecognised algorithm
+ * identifier, so a missing account cost ~0.1 ms against ~26 ms for a real one and the
+ * timing difference disclosed which usernames exist. Derived once per hasher and reused,
+ * because generating it per request would reintroduce the cost it is meant to hide.
+ */
+const dummyHashes = new WeakMap<PasswordHasher, Promise<string>>();
+function dummyHashFor(hasher: PasswordHasher): Promise<string> {
+  let pending = dummyHashes.get(hasher);
+  if (!pending) {
+    pending = hasher.hash("termix-placeholder-for-a-user-that-does-not-exist");
+    dummyHashes.set(hasher, pending);
+  }
+  return pending;
+}
 
 export const authRoutes = new Hono<AppEnv>()
   .post("/register", verifyTurnstile, zValidator("json", registerSchema), async (c) => {
@@ -74,8 +99,9 @@ export const authRoutes = new Hono<AppEnv>()
     const hasher = c.var.hasher;
 
     const user = await db.select().from(schema.users).where(eq(schema.users.username, username)).get();
-    // Constant-time: always run verify even if user doesn't exist
-    const hashToVerify = user?.passwordHash ?? "$dummy$";
+    // Always verify, so that an account that does not exist costs the same as one that
+    // does. The hash must come from the active hasher — see dummyHashFor.
+    const hashToVerify = user?.passwordHash ?? (await dummyHashFor(hasher));
     const algo = (user?.hashAlgorithm ?? hasher.algorithm) as HashAlgorithm;
     const valid = await verifyWithAlgorithm(password, hashToVerify, algo);
     if (!user || !valid) {
@@ -105,7 +131,7 @@ export const authRoutes = new Hono<AppEnv>()
     const db = c.var.db;
 
     try {
-      const { payload } = await verifyToken(refreshToken, c.var.jwtSecret);
+      const { payload } = await verifyToken(refreshToken, c.var.jwtSecret, REFRESH_AUDIENCE);
       const tokenId = payload.jti as string;
       const userId = payload.sub as string;
 

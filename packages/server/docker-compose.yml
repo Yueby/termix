@@ -6,8 +6,12 @@ services:
     volumes:
       - termix-data:/app/data
     environment:
-      - JWT_SECRET=change-me-in-production
-      - TURNSTILE_SECRET=
+      # No default is shipped. A literal in this file is a published signing key: anyone
+      # who deploys with it can forge a token for any account. Compose refuses to start
+      # until a real one is supplied.
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set to a random value}
+      # Leave empty to run without CAPTCHA; set it to protect registration and login.
+      - TURNSTILE_SECRET=${TURNSTILE_SECRET:-}
       - PORT=3000
     restart: unless-stopped
 

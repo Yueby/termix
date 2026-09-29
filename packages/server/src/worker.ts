@@ -9,24 +9,23 @@ type Env = {
   TURNSTILE_SECRET: string;
 };
 
-const app = createApp();
-
-app.use("*", async (c, next) => {
+// A Worker has no startup phase, so the context is resolved per request. The missing
+// secret check the Node entry point performs in main() happens here instead: jose
+// rejects a zero-length key, so without it the failure surfaces as an opaque 500 on
+// every authenticated request rather than naming the cause.
+const app = createApp((c) => {
   const env = c.env as unknown as Env;
 
-  // A Worker has no startup phase, so the missing-secret check the Node entry point
-  // performs in main() happens per request here. It has to be explicit: jose rejects a
-  // zero-length key, so without this the failure surfaces as an opaque 500 on every
-  // authenticated request instead of naming the cause.
   if (!env.JWT_SECRET) {
     throw new Error("JWT_SECRET binding is not configured");
   }
 
-  c.set("db", createD1Database(env.DB));
-  c.set("hasher", createWebCryptoHasher());
-  c.set("jwtSecret", env.JWT_SECRET);
-  c.set("turnstileSecret", env.TURNSTILE_SECRET || "");
-  await next();
+  return {
+    db: createD1Database(env.DB),
+    hasher: createWebCryptoHasher(),
+    jwtSecret: env.JWT_SECRET,
+    turnstileSecret: env.TURNSTILE_SECRET || "",
+  };
 });
 
 export default app;
