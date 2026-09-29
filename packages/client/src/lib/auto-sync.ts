@@ -46,6 +46,11 @@ async function push() {
   try {
     const message = await syncPush();
     logger.info("push: " + message);
+    // A push that found the remote ahead pulls instead, which rewrites the database from
+    // outside the frontend. Reloading unconditionally is cheaper than trying to tell those
+    // two outcomes apart from the message, and it costs one read of a vault measured in
+    // kilobytes.
+    await reloadLocal();
   } catch (error) {
     // Not raised as a toast. This runs unprompted, and a failure here is usually a network
     // that will answer in four seconds. The manual Push button is where a person asks and
@@ -82,9 +87,6 @@ export function startAutoSync() {
  *
  * This is the half that makes "open the app on the other machine and the hosts are there"
  * work. The other half is the push scheduled after an edit.
- *
- * A conflict is never resolved here: the Rust side reports it instead of pulling, because a
- * pull applies the remote vault wholesale and would discard unpushed local work silently.
  */
 export async function pullAtStartup() {
   if (!enabled()) return;

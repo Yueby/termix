@@ -226,13 +226,14 @@ async fn termix_push(db: &Database, settings: &AppSettings) -> Result<String, St
             Ok(format!("Pushed version {next}"))
         }
         PushOutcome::Conflict { server_version } => {
-            // Deliberately not pulling here. A pull applies the remote vault wholesale, so
-            // doing it automatically would discard whatever this machine had not pushed yet
-            // — and it would do it while nobody was looking. Reporting it leaves the choice,
-            // and the data, with the person it belongs to.
+            // The remote is ahead, so take it: keeping the newest data is the point of syncing,
+            // and a stale local vault is worth less than a current one. The pull applies the
+            // remote wholesale, so whatever this machine had not pushed is replaced — which
+            // is why the outcome is reported rather than left silent.
+            let summary = termix_pull(db, settings).await?;
             Ok(format!(
-                "The server already holds version {server_version}, which is newer than this \
-                 machine's. Pull first to bring it in, then push again."
+                "The server was ahead at version {server_version}; pulled it instead of \
+                 pushing ({summary})"
             ))
         }
     }
