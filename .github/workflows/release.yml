@@ -72,15 +72,19 @@ jobs:
       - name: Require the checks to have passed for this commit
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           sha=$(git rev-parse HEAD)
-          runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --paginate --jq '.check_runs')
-          total=$(echo "$runs" | jq 'length')
 
-          # Nothing here guarantees that the revision being signed and published is one CI
-          # has looked at: the workflow runs on a tag, which can point anywhere.
+          # This workflow's own run is one of the checks on this commit, and it is the one
+          # asking. Counting it makes the gate impossible to satisfy: it is in progress while
+          # the question is being asked, and a moment later it is the run that failed.
+          runs=$(gh run list --commit "$sha" --limit 100 --json workflowName,conclusion \
+            --jq '[.[] | select(.workflowName != "Release")]')
+
+          total=$(echo "$runs" | jq 'length')
+          # Nothing else guarantees that the revision being signed and published is one CI has
+          # looked at: a tag can point anywhere.
           if [ "$total" -eq 0 ]; then
             echo "::error::No checks ran for $sha. Release a revision CI has seen — merge to main and let it pass first."
             exit 1
@@ -88,7 +92,7 @@ jobs:
 
           bad=$(echo "$runs" | jq -r '[.[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")]')
           if [ "$(echo "$bad" | jq 'length')" -ne 0 ]; then
-            echo "$bad" | jq -r '.[] | "::error::\(.name): \(.conclusion)"'
+            echo "$bad" | jq -r '.[] | "::error::\(.workflowName): \(.conclusion)"'
             exit 1
           fi
 
