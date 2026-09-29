@@ -1,6 +1,57 @@
 # Changelog
 
 Notable changes to Termix, grouped by release.
+## [0.1.0] - 2026-09-29
+
+### Features
+
+- Implement Termix SSH client with full UI and connection management
+- Migrate data storage to SQLite + add WebDAV sync + settings UI overhaul
+- 实现 SFTP 文件管理、Keychain 密钥管理及全项目代码审查修复
+- Keychain 增强、host 分组、加密存储重构、SFTP 隐藏文件
+- Terminal logs, tab bar theme colors, about dialog, app icon, docs
+- Proxy support, automatic reconnect and reliable disconnect reporting
+
+
+### Maintenance
+
+- Remove root src/ and src-tauri/ residuals after monorepo migration
+- Add CI, rebuild the release pipeline and generate the changelog from commits
+- Name the updater manifest input correctly and quiet dependabot
+
+
+### Other
+
+- Initial commit
+- Remake and clear file
+- Merge pull request #1 from Yueby/feat/implement-ssh-client
+
+feat: implement Termix SSH client with full UI and connection management
+- Update .gitignore
+- Merge pull request #2 from Yueby/feat/data-storage-webdav-sync
+
+feat: migrate data storage to SQLite + add WebDAV sync + settings UI overhaul
+- Merge pull request #3 from Yueby/feat/sftp-keychain-code-review
+
+feat: 实现 SFTP 文件管理、Keychain 密钥管理及全项目代码审查修复
+- Merge pull request #4 from Yueby/feat/keychain-host-group-sftp
+
+feat: keychain 增强、host 分组、加密存储重构、SFTP 隐藏文件
+- Merge pull request #5 from Yueby/feat/logs-ui-polish-docs
+
+feat: terminal logs, tab bar theme colors, about dialog, app icon, docs
+- Merge pull request #6 from Yueby/refactor/monorepo-structure
+
+refactor: restructure project as monorepo with client/server packages
+- Merge pull request #7 from Yueby/chore/cleanup-root-residuals
+
+chore: remove root src/ and src-tauri/ residuals after monorepo migration
+
+
+### Refactoring
+
+- Restructure project as monorepo with client/server packages
+
 
 ## [Unreleased]
 
