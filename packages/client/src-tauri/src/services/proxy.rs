@@ -261,6 +261,43 @@ fn is_bypassed(target_host: &str) -> bool {
     matches_bypass(&entries, target_host)
 }
 
+/// Wildcard match where every `*` is anchored where it sits.
+///
+/// The previous version trimmed the asterisks and asked whether the host merely
+/// *contained* the remainder, so `*.internal` also bypassed
+/// `db.internal.attacker.example` — traffic meant for the proxy went direct, which is a
+/// disclosure rather than an inconvenience. A pattern without a leading `*` has to match
+/// at the start, and one without a trailing `*` has to match at the end.
+fn wildcard_match(pattern: &str, host: &str) -> bool {
+    let leading = pattern.starts_with('*');
+    let trailing = pattern.ends_with('*');
+    let parts: Vec<&str> = pattern.split('*').filter(|p| !p.is_empty()).collect();
+    if parts.is_empty() {
+        return true; // The pattern was just "*" or "**".
+    }
+
+    let mut rest = host;
+    for (index, part) in parts.iter().enumerate() {
+        if index == 0 && !leading {
+            match rest.strip_prefix(part) {
+                Some(stripped) => {
+                    rest = stripped;
+                    continue;
+                }
+                None => return false,
+            }
+        }
+        if index == parts.len() - 1 && !trailing {
+            return rest.ends_with(part);
+        }
+        match rest.find(part) {
+            Some(position) => rest = &rest[position + part.len()..],
+            None => return false,
+        }
+    }
+    true
+}
+
 /// Wildcard matching for bypass entries: `*` spans anything, `<local>` means a
 /// name without dots, and a bare entry matches the host and its subdomains.
 fn matches_bypass(entries: &[&str], target_host: &str) -> bool {
@@ -289,9 +326,8 @@ fn matches_bypass(entries: &[&str], target_host: &str) -> bool {
             })
             .unwrap_or(entry.as_str());
 
-        if pattern.starts_with('*') || pattern.ends_with('*') {
-            let trimmed = pattern.trim_matches('*');
-            if !trimmed.is_empty() && host.contains(trimmed) {
+        if pattern.contains('*') {
+            if wildcard_match(pattern, &host) {
                 return true;
             }
         } else if host == pattern || host.ends_with(&format!(".{pattern}")) {
@@ -414,6 +450,23 @@ mod tests {
         assert!(matches_bypass(&entries, "intranet"));
         assert!(!matches_bypass(&entries, "216.23.83.151"));
         assert!(!matches_bypass(&entries, "example.com"));
+
+        // The wildcard is anchored where it sits rather than matching a substring
+        // anywhere in the host. Without that, `*.internal` also bypassed
+        // `db.internal.attacker.example` and `192.168.*` also bypassed
+        // `x192.168.31.215` — traffic meant for the proxy went direct instead.
+        assert!(!matches_bypass(&entries, "db.internal.attacker.example"));
+        assert!(!matches_bypass(&entries, "x192.168.31.215"));
+        // `<local>` matches any name without a dot, so this set cannot be used to ask
+        // whether `*.internal` matches a bare `internal`.
+        assert!(matches_bypass(&entries, "internal"));
+        // `*.internal` needs at least one label in front of the dot.
+        assert!(!matches_bypass(&["*.internal"], "internal"));
+
+        // A wildcard in the middle is still a wildcard, and a bare one matches anything.
+        assert!(matches_bypass(&["*mple*"], "example.com"));
+        assert!(!matches_bypass(&["mple*"], "example.com"));
+        assert!(matches_bypass(&["*"], "anything.example"));
     }
 
     /// End-to-end check of both tunnel kinds against a proxy that has to be
