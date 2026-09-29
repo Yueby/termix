@@ -38,9 +38,18 @@ updates:
         patterns:
           - "russh*"
           - "ssh-key"
+    ignore:
+      # sqlx 0.9 requires rustc 1.94.0 and the project is on 1.93.1, so this bump
+      # cannot compile. Drop this entry once the toolchain moves.
+      - dependency-name: "sqlx"
+        update-types: ["version-update:semver-major"]
 
-  # Keep the actions used by the workflows current.
+  # Keep the actions used by the workflows current — as ONE pull request, so a
+  # routine action bump does not arrive as four.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

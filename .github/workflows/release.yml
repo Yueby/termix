@@ -108,7 +108,10 @@ jobs:
           # human publishes this release. See CONTRIBUTING.md.
           releaseDraft: true
           prerelease: false
-          includeUpdaterJson: true
+          # The input is `uploadUpdaterJson` (the default is true anyway, but saying
+          # it explicitly means a change of default upstream cannot silently stop
+          # shipping the manifest that updates depend on).
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
 
   changelog:
