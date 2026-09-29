@@ -1,0 +1,46 @@
+version: 2
+updates:
+  # Frontend and server dependencies. Both live in the same pnpm workspace, so one
+  # entry at the root covers packages/*.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Toolchain bumps are noisy on their own; keep them in one PR.
+      dev-tooling:
+        patterns:
+          - "typescript"
+          - "vite"
+          - "@vitejs/*"
+          - "tsup"
+          - "tsx"
+      tauri:
+        patterns:
+          - "@tauri-apps/*"
+    ignore:
+      # Deliberately held back: TypeScript 7 is a compiler rewrite and Tauri 3 is
+      # still alpha. Revisit as a considered migration, not a routine bump.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: cargo
+    directory: "/packages/client/src-tauri"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # russh, ssh-key and russh-sftp have to move together.
+      ssh-stack:
+        patterns:
+          - "russh*"
+          - "ssh-key"
+
+  # Keep the actions used by the workflows current.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

@@ -11,6 +11,8 @@ Built with **Tauri v2** + **React** + **Rust**
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white)](https://react.dev/)
 [![Rust](https://img.shields.io/badge/Rust-stable-DEA584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![CI](https://github.com/Yueby/termix/actions/workflows/ci.yml/badge.svg)](https://github.com/Yueby/termix/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Yueby/termix?display_name=tag&sort=semver)](https://github.com/Yueby/termix/releases/latest)
 
 [简体中文](./README_CN.md)
 
@@ -36,6 +38,17 @@ Built with **Tauri v2** + **React** + **Rust**
 | Frontend | React, TypeScript, Tailwind CSS, shadcn/ui |
 | Backend | Rust, russh, sqlx (SQLite), aes-gcm |
 | Terminal | xterm.js with WebGL renderer |
+
+## Download
+
+Installers for every supported platform are on the
+[latest release](https://github.com/Yueby/termix/releases/latest): an `.exe` installer
+for Windows, a `.dmg` for macOS (separate builds for Apple Silicon and Intel), and
+an `.AppImage` or `.deb` for Linux.
+
+Installed builds check for updates on launch and can install them in place. The
+update manifests are signed, so a build only accepts an update signed with the same
+key it was released with.
 
 ## Getting Started
 
@@ -71,6 +84,12 @@ pnpm tauri build
 | Terminal | SFTP |
 |:---:|:---:|
 | ![Terminal](./screenshots/3.png) | ![SFTP](./screenshots/4.png) |
+
+## Contributing
+
+Bug reports, feature requests and pull requests are welcome — see
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the development setup, the checks CI runs,
+and the release process. Changes are listed in [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 

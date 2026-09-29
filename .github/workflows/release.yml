@@ -1,45 +1,98 @@
 name: Release
 
+# Triggered by pushing a tag like v0.2.0. The manual entry point exists so a release
+# can be rebuilt without moving the tag.
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.0.0)"
+        description: "Tag to release (e.g. v0.2.0)"
         required: true
+
+permissions:
+  contents: write
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
-  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+  CARGO_TERM_COLOR: always
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  build:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macOS (Apple Silicon)
+            platform: macos-latest
+            args: --target aarch64-apple-darwin
+            targets: aarch64-apple-darwin
+          - label: macOS (Intel)
+            platform: macos-latest
+            args: --target x86_64-apple-darwin
+            targets: x86_64-apple-darwin
+          - label: Linux (x86_64)
+            platform: ubuntu-22.04
+            args: ""
+            targets: ""
+          - label: Windows (x86_64)
+            platform: windows-latest
+            args: ""
+            targets: ""
+    runs-on: ${{ matrix.platform }}
+    env:
+      # Updater artifacts are signed with this key; the matching public key lives in
+      # tauri.conf.json. `bundle.createUpdaterArtifacts` is true, so a missing or
+      # mismatched key fails the build outright rather than producing an unusable
+      # update.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          fetch-depth: 0
+
+      # Version comes from `packageManager` — do not pin it here too.
+      - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
 
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: packages/client/src-tauri -> target
+          key: ${{ matrix.args }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libgtk-3-dev
 
       - run: pnpm install --frozen-lockfile
+
+      - name: Generate release notes
+        id: notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: .github/cliff.toml
+          args: --latest --strip header
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -48,60 +101,40 @@ jobs:
           projectPath: packages/client
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: "Termix ${{ inputs.tag || github.ref_name }}"
+          releaseBody: ${{ steps.notes.outputs.content }}
+          # A draft, deliberately: the updater endpoint is
+          # `releases/latest/download/latest.json`, and GitHub's `/releases/latest`
+          # excludes drafts and prereleases. The update only reaches users once a
+          # human publishes this release. See CONTRIBUTING.md.
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
+          args: ${{ matrix.args }}
 
-  build-android:
-    needs: build-windows
+  changelog:
+    name: Update CHANGELOG.md
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          fetch-depth: 0
+          ref: main
 
-      - uses: actions/setup-node@v4
+      - name: Prepend the new section
+        uses: orhun/git-cliff-action@v4
         with:
-          node-version: 22
-          cache: pnpm
+          config: .github/cliff.toml
+          args: --latest --prepend CHANGELOG.md
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - uses: android-actions/setup-android@v3
-
-      - uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: r27c
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Initialize Tauri Android
-        working-directory: packages/client
-        run: pnpm tauri android init
-
-      - name: Build Android APK
-        working-directory: packages/client
-        env:
-          NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-        run: pnpm tauri android build --apk
-
-      - name: Upload Android APK
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ inputs.tag || github.ref_name }}
-          draft: true
-          files: |
-            packages/client/src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Commit back to main
+        run: |
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md already up to date."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          git commit -m "docs: update changelog for ${{ inputs.tag || github.ref_name }} [skip ci]"
+          git push origin main

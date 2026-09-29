@@ -1,0 +1,10 @@
+# Ensures rustfmt and clippy are present for local work and for the advisory lint job.
+#
+# The channel is left on `stable` so it matches `dtolnay/rust-toolchain@stable` in CI;
+# pinning an exact version here would silently diverge from what CI installs. If you
+# do want a pinned compiler, change both this file and the workflows together.
+#
+# Note: sqlx 0.9 requires rustc 1.94.0, which is why the project is still on 0.8.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
