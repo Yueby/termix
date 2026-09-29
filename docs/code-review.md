@@ -29,6 +29,9 @@ Status legend: **fixed** means it is repaired in `main` with a test or a measure
 | 13 | Server | **Concurrent sync pushes could overwrite newer data with older data** while both reported success, and two simultaneous first pushes made the loser a 500. | The version predicate is in the statement; 9 request tests. |
 | 14 | Repo | **The signing key was readable by every step of build job**, manual releases built the dispatched revision while labelling it with the requested tag, and nothing checked the four version fields. | `verify` job plus step-scoped secrets. |
 | 15 | Repo | **Clippy had 11 warnings and ran advisory.** | Two row types became named aliases; four signatures the IPC contract or russh fixes carry a targeted allow with its reason. Clippy is clean and gates. |
+| 16 | Client | **`HostDetail` changed its hook count**, so it threw a hook-order error instead of rendering its placeholder whenever the selected connection disappeared. | Every hook now runs before the return. |
+| 17 | Client | **Closing a connection mid-flight left an ownerless session and an unbounded output buffer.** | Teardown is driven by the operation that settles, the buffer is capped at 1 MiB, and two further leaks on the same path were fixed. |
+| 18 | Rust | **`*.internal` bypassed `db.internal.attacker.example`**, because the wildcard was matched as an unanchored substring, sending traffic meant for the proxy direct. | Anchored wildcard matching; the tests that were missing are the negative ones. |
 
 ## Open — highest severity
 
@@ -45,9 +48,7 @@ Status legend: **fixed** means it is repaired in `main` with a test or a measure
   metadata outside the main write; global proxy credentials sync as machine-specific
   ciphertext; pull reports success when every fetch failed; copying a directory into its
   own descendant copies its own output; `ALL_PROXY=socks5://…` keeps its scheme on
-  non-Windows; bypass matching is substring-based, so `*.internal` also matches
-  `db.internal.attacker.example`; the login fallback for a missing account now does equal
-  work, so the timing oracle is closed on both hashers.
+  non-Windows, so a SOCKS proxy set that way is never reached.
 
 ### Server
 
@@ -68,15 +69,7 @@ Status legend: **fixed** means it is repaired in `main` with a test or a measure
 
 ### Frontend
 
-- **`HostDetail` changes its hook count.** The last `useEffect` sits below a conditional
-  early return, so the component throws when `conn` goes from present to absent — which
-  happens when a new host's save fails (the panel opens optimistically and the connection
-  is removed on error) or when a sync pull removes the connection being edited. There is
-  no error boundary to contain it. Move every hook above the return.
-- **Closing an in-flight connection leaves an ownerless session.** Disconnect only acts on
-  a `sessionId` already recorded on the tab, and a connection still in its startup delay
-  or authenticating has `sessionId: null`. The operation continues after the tab is gone,
-  never disconnects, and its output buffer is retained indefinitely.
+Nothing open. The two defects found in this area are fixed — see rows 16 and 17.
 
 ## Verification notes
 
