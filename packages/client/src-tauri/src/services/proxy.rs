@@ -188,10 +188,15 @@ fn parse_windows_proxy_server(server: &str) -> Option<ProxyConfig> {
 }
 
 fn parse_host_port(value: &str) -> Option<(String, u16)> {
+    // Strip whatever scheme is there, not just the two HTTP ones. `ALL_PROXY` on Linux is
+    // commonly `socks5://127.0.0.1:1080`, and that was recognised as SOCKS5 by
+    // `env_system_proxy` and then failed to parse: the scheme stayed in the host, so the
+    // connection tried to resolve `socks5://127.0.0.1`.
+    let value = value.trim();
     let value = value
-        .trim()
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(value);
     let (host, port) = value.rsplit_once(':')?;
     let port: u16 = port.trim().parse().ok()?;
     if host.trim().is_empty() || port == 0 {
@@ -423,6 +428,29 @@ mod tests {
         assert_eq!(parsed.host, "127.0.0.1");
         assert_eq!(parsed.port, 7890);
         assert_eq!(parsed.kind, ProxyKind::Http);
+    }
+
+    #[test]
+    fn strips_whatever_scheme_a_proxy_url_carries() {
+        // `ALL_PROXY=socks5://127.0.0.1:1080` is how this is usually set on Linux. The scheme
+        // used to stay in the host, so the connection tried to resolve "socks5://127.0.0.1"
+        // and failed even though the proxy was recognised as SOCKS5.
+        assert_eq!(
+            parse_host_port("socks5://127.0.0.1:1080"),
+            Some(("127.0.0.1".to_string(), 1080))
+        );
+        assert_eq!(
+            parse_host_port("socks://proxy.example:1080"),
+            Some(("proxy.example".to_string(), 1080))
+        );
+        assert_eq!(
+            parse_host_port("http://proxy.example:8080"),
+            Some(("proxy.example".to_string(), 8080))
+        );
+        assert_eq!(
+            parse_host_port("proxy.example:8080"),
+            Some(("proxy.example".to_string(), 8080))
+        );
     }
 
     #[test]
