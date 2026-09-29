@@ -1,23 +1,24 @@
 import { useContextMenu } from "@/hooks/use-context-menu";
 import type { FileEntry } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-    AlertCircle,
-    AppWindow,
-    ArrowDown,
-    ArrowUp,
-    Copy,
-    ExternalLink,
-    File,
-    Folder,
-    FolderPlus,
-    Loader2,
-    Pencil,
-    RefreshCw,
-    Shield,
-    Trash2,
+  AlertCircle,
+  AppWindow,
+  ArrowDown,
+  ArrowUp,
+  Copy,
+  ExternalLink,
+  File,
+  Folder,
+  FolderPlus,
+  Loader2,
+  Pencil,
+  RefreshCw,
+  Shield,
+  Trash2,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 export type FileAction =
   | "open"
@@ -43,6 +44,8 @@ interface FileTableProps {
 
 type SortKey = "name" | "modified" | "size" | "kind";
 type SortDir = "asc" | "desc";
+
+const ROW_HEIGHT = 29;
 
 function sortFiles(files: FileEntry[], key: SortKey, dir: SortDir): FileEntry[] {
   return [...files].sort((a, b) => {
@@ -73,6 +76,7 @@ export function FileTable({ files, loading, error, showParent, showHiddenFiles, 
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const { menu, menuRef, open, close } = useContextMenu();
 
   const visibleFiles = useMemo(
@@ -80,6 +84,34 @@ export function FileTable({ files, loading, error, showParent, showHiddenFiles, 
     [files, showHiddenFiles],
   );
   const sortedFiles = useMemo(() => sortFiles(visibleFiles, sortKey, sortDir), [visibleFiles, sortKey, sortDir]);
+
+  const totalCount = (showParent ? 1 : 0) + sortedFiles.length;
+
+  const getItemKey = useCallback(
+    (index: number) => {
+      if (showParent && index === 0) return "__parent__";
+      const file = sortedFiles[showParent ? index - 1 : index];
+      return file ? `${file.name}-${file.modified ?? 0}` : index;
+    },
+    [showParent, sortedFiles],
+  );
+
+  const rowVirtualizer = useVirtualizer({
+    count: totalCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 10,
+    getItemKey,
+  });
+
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const totalSize = rowVirtualizer.getTotalSize();
+
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? totalSize - virtualItems[virtualItems.length - 1].end
+      : 0;
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -151,39 +183,65 @@ export function FileTable({ files, loading, error, showParent, showHiddenFiles, 
       </div>
 
       <div
+        ref={scrollRef}
         className="flex-1 overflow-y-auto min-h-0"
         onContextMenu={handleContextMenu}
         onClick={(e) => {
           if (e.target === e.currentTarget) setSelectedName(null);
         }}
       >
-        <div className="divide-y divide-border/50">
-          {showParent && (
-            <FileRow
-              name=".."
-              isDir={true}
-              size={0}
-              kind="folder"
-              selected={false}
+        <div>
+          {paddingTop > 0 && (
+            <div
+              style={{ height: `${paddingTop}px` }}
+              aria-hidden="true"
               onClick={() => setSelectedName(null)}
-              onDoubleClick={() => onDoubleClick("..", true)}
             />
           )}
 
-          {sortedFiles.map((file) => (
-            <FileRow
-              key={`${file.name}-${file.modified ?? 0}`}
-              name={file.name}
-              isDir={file.is_dir}
-              size={file.size}
-              modified={file.modified}
-              kind={file.kind}
-              permissions={file.permissions}
-              selected={selectedName === file.name}
-              onClick={() => setSelectedName(file.name)}
-              onDoubleClick={() => onDoubleClick(file.name, file.is_dir)}
+          {virtualItems.map((virtualItem) => {
+            if (showParent && virtualItem.index === 0) {
+              return (
+                <FileRow
+                  key="__parent__"
+                  name=".."
+                  isDir={true}
+                  size={0}
+                  kind="folder"
+                  selected={false}
+                  onClick={() => setSelectedName(null)}
+                  onDoubleClick={() => onDoubleClick("..", true)}
+                />
+              );
+            }
+
+            const fileIndex = showParent ? virtualItem.index - 1 : virtualItem.index;
+            const file = sortedFiles[fileIndex];
+            if (!file) return null;
+
+            return (
+              <FileRow
+                key={virtualItem.key}
+                name={file.name}
+                isDir={file.is_dir}
+                size={file.size}
+                modified={file.modified}
+                kind={file.kind}
+                permissions={file.permissions}
+                selected={selectedName === file.name}
+                onClick={() => setSelectedName(file.name)}
+                onDoubleClick={() => onDoubleClick(file.name, file.is_dir)}
+              />
+            );
+          })}
+
+          {paddingBottom > 0 && (
+            <div
+              style={{ height: `${paddingBottom}px` }}
+              aria-hidden="true"
+              onClick={() => setSelectedName(null)}
             />
-          ))}
+          )}
 
           {sortedFiles.length === 0 && !showParent && (
             <div className="flex items-center justify-center py-12 text-muted-foreground text-xs">
@@ -335,9 +393,9 @@ function FileRow({
     <div
       data-file-name={name === ".." ? undefined : name}
       className={cn(
-        "grid grid-cols-[1fr_160px_80px_80px] gap-2 px-3 py-1.5 text-xs cursor-default",
+        "grid grid-cols-[1fr_160px_80px_80px] gap-2 px-3 py-1.5 text-xs cursor-default h-[29px] box-border border-b border-border/50",
         "hover:bg-accent/50 transition-colors select-none",
-        selected && "bg-primary/15 hover:bg-primary/20"
+        selected && "bg-primary/15 hover:bg-primary/20",
       )}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
