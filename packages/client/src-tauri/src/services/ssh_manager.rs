@@ -113,6 +113,7 @@ impl SshManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn connect(
         &self,
         app: AppHandle,

@@ -21,6 +21,27 @@ pub struct Database {
     pool: Pool<Sqlite>,
 }
 
+/// Row shape of the connections query. Thirteen positional columns, which is unreadable
+/// written inline.
+type ConnectionRow = (
+    String,
+    String,
+    String,
+    i32,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+);
+
+/// Row shape of the terminal-log query.
+type TerminalLogRow = (String, String, String, String, String, String, i64, i64);
+
 impl Database {
     pub async fn new(app_dir: &str) -> Result<Self> {
         let db_path = format!("{}/termix.db", app_dir);
@@ -278,21 +299,7 @@ impl Database {
     // ── Connections ──
 
     pub async fn get_connections(&self) -> Result<Vec<ConnectionInfo>> {
-        let rows: Vec<(
-            String,
-            String,
-            String,
-            i32,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-            String,
-        )> = sqlx::query_as(
+        let rows: Vec<ConnectionRow> = sqlx::query_as(
             "SELECT id, name, host, port, username, auth_type, group_name,
                         encrypted_password, encrypted_key_path, encrypted_key_passphrase,
                         COALESCE(keychain_id, '') as keychain_id,
@@ -533,7 +540,7 @@ impl Database {
     pub async fn get_terminal_logs(
         &self,
     ) -> Result<Vec<crate::commands::terminal_log::TerminalLogEntry>> {
-        let rows: Vec<(String, String, String, String, String, String, i64, i64)> = sqlx::query_as(
+        let rows: Vec<TerminalLogRow> = sqlx::query_as(
             "SELECT id, connection_id, connection_name, host, username, session_type, started_at, ended_at
              FROM terminal_logs ORDER BY ended_at DESC",
         )

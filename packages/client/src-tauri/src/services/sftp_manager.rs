@@ -46,6 +46,9 @@ impl client::Handler for SftpHandler {
         async move { verdict }
     }
 
+    // russh 0.63 declares its handler methods as plain `fn`s returning `impl Future`;
+    // `async fn` is not available to a trait implementation, so the signature stays.
+    #[allow(clippy::manual_async_fn)]
     fn data(
         &mut self,
         _channel: ChannelId,

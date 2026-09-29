@@ -41,6 +41,7 @@ impl LocalTerminalManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn spawn(
         &self,
         app: AppHandle,

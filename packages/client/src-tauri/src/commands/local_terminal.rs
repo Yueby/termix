@@ -9,6 +9,9 @@ pub struct LocalOpenResult {
     pub session_id: String,
 }
 
+// The signature is the IPC contract: Tauri maps these argument names to what the
+// frontend sends, so grouping them into a struct would change the wire format.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn local_open(
     app: AppHandle,
