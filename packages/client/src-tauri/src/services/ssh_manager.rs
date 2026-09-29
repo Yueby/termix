@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Result};
 use parking_lot::Mutex as SyncMutex;
 use russh::client::DisconnectReason;
-use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{client, Channel, ChannelId, Disconnect};
 use serde::Serialize;
 use tauri::ipc::{Channel as IpcChannel, InvokeResponseBody};
@@ -14,6 +14,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::commands::ssh::AuthMethod;
+use crate::services::host_keys;
 use crate::services::proxy::{self, ProxyMode};
 
 /// Seconds between keepalive probes sent to the server.
@@ -31,6 +32,8 @@ pub struct SshDisconnectEvent {
 struct ClientHandler {
     sender: mpsc::UnboundedSender<Vec<u8>>,
     disconnect_reason: Arc<SyncMutex<Option<String>>>,
+    host: String,
+    port: u16,
 }
 
 // russh 0.63 dropped the `async_trait` indirection: the handler methods are plain
@@ -42,16 +45,10 @@ impl client::Handler for ClientHandler {
         &mut self,
         server_public_key: &PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        // TODO: Implement known_hosts verification to prevent MITM attacks.
-        // Currently accepts all host keys — acceptable for early development only.
-        // `{}` (Display) prints the OpenSSH form, `SHA256:base64`, which is what
-        // `ssh-keyscan` and `ssh -v` show and therefore the only form a user can
-        // actually compare against.
-        log::warn!(
-            "Host key verification skipped. Fingerprint: {}",
-            server_public_key.public_key().fingerprint(HashAlg::Sha256)
-        );
-        async { Ok(true) }
+        // Trust on first use, and refuse a changed key afterwards. Resolved here rather
+        // than inside the returned future so no borrow of `self` has to outlive the call.
+        let verdict = host_keys::verify_host_key(&self.host, self.port, server_public_key);
+        async move { verdict }
     }
 
     fn data(
@@ -141,6 +138,8 @@ impl SshManager {
         let handler = ClientHandler {
             sender: tx,
             disconnect_reason: disconnect_reason.clone(),
+            host: host.to_string(),
+            port,
         };
 
         // The proxy has to be applied before the SSH handshake, so the tunnel is
@@ -299,6 +298,9 @@ impl SshManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the network test below renders a fingerprint now; production code hands that
+    // to host_keys::verify_host_key.
+    use russh::keys::HashAlg;
 
     /// The 0.63 migration rewrote the handler signatures and moved the host key
     /// type to `PublicKeyOrCertificate`. Getting as far as key exchange proves

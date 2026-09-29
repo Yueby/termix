@@ -1,5 +1,6 @@
 pub mod crypto;
 pub mod db;
+pub mod host_keys;
 pub mod local_terminal;
 pub mod logger;
 pub mod port_forward;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use anyhow::{anyhow, Result};
-use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
+use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{client, ChannelId, Disconnect};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::FileAttributes;
@@ -13,6 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 use crate::commands::ssh::AuthMethod;
+use crate::services::host_keys;
 use crate::services::proxy::{self, ProxyMode};
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,7 +26,10 @@ pub struct FileEntry {
     pub kind: String,
 }
 
-struct SftpHandler;
+struct SftpHandler {
+    host: String,
+    port: u16,
+}
 
 // See ssh_manager: russh 0.63 handlers are plain `fn`s returning `impl Future`.
 impl client::Handler for SftpHandler {
@@ -35,13 +39,11 @@ impl client::Handler for SftpHandler {
         &mut self,
         server_public_key: &PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-        // TODO: Implement known_hosts verification to prevent MITM attacks.
-        // Display, not Debug — see the note in ssh_manager.rs.
-        log::warn!(
-            "Host key verification skipped. Fingerprint: {}",
-            server_public_key.public_key().fingerprint(HashAlg::Sha256)
-        );
-        async { Ok(true) }
+        // The same policy the SSH client uses — see host_keys::verify_host_key. Resolved
+        // here rather than inside the returned future so no borrow of `self` outlives the
+        // call.
+        let verdict = host_keys::verify_host_key(&self.host, self.port, server_public_key);
+        async move { verdict }
     }
 
     fn data(
@@ -81,7 +83,10 @@ impl SftpManager {
         let session_id = uuid::Uuid::new_v4().to_string();
 
         let config = Arc::new(client::Config::default());
-        let handler = SftpHandler;
+        let handler = SftpHandler {
+            host: host.to_string(),
+            port,
+        };
 
         // Build the tunnel first: russh cannot dial through a proxy itself.
         let proxy = proxy::resolve(proxy_mode, host);
