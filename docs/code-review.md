@@ -32,44 +32,42 @@ Status legend: **fixed** means it is repaired in `main` with a test or a measure
 | 16 | Client | **`HostDetail` changed its hook count**, so it threw a hook-order error instead of rendering its placeholder whenever the selected connection disappeared. | Every hook now runs before the return. |
 | 17 | Client | **Closing a connection mid-flight left an ownerless session and an unbounded output buffer.** | Teardown is driven by the operation that settles, the buffer is capped at 1 MiB, and two further leaks on the same path were fixed. |
 | 18 | Rust | **`*.internal` bypassed `db.internal.attacker.example`**, because the wildcard was matched as an unanchored substring, sending traffic meant for the proxy direct. | Anchored wildcard matching; the tests that were missing are the negative ones. |
+| 19 | Rust | **A local shell that stopped reading its input froze every other local terminal**, because the write went to the PTY while holding the session map's lock. | Per-session writer thread; the handler only queues. |
+| 20 | Rust | **Exited shells were never reaped and never removed from the map**, and neither were dropped SSH sessions; `kill` does not collect a process, so every closed terminal left a zombie on Unix. | Readers clean up and wait on the child, with a per-session generation so a dead connection cannot evict a later one. |
+| 21 | Rust | **Copying a directory into its own descendant recursed until the disk filled.** The destination is created before the source is enumerated, so it appeared in its own listing. | Refused, with tests for both the refusal and the sibling copy that must still work. Symlinks are recreated rather than followed. |
+| 22 | Rust | **Every `ALTER TABLE` result was discarded**, so a lock or a full disk read as "the column is already there". | Only a genuine duplicate-column error is tolerated. |
+| 23 | Rust | **A pull that read nothing answered "Pull completed"**, a response body that failed to read became "nothing to import", and the global proxy password was imported as ciphertext this machine could never decrypt. | Arrival is counted, 404 is distinguished from failure, and the proxy password stays local. |
+| 24 | Rust | **The encryption key file was created with whatever permissions it inherited.** | 0600 on Unix, repaired on read for existing installs. |
+| 25 | Rust | **`ALL_PROXY=socks5://…` never reached the proxy on non-Windows**, because only the http prefixes were stripped. | Any scheme is stripped. |
+| 26 | Server | **The Worker could not be built at all.** `wrangler deploy` failed with `Could not resolve "os"`, because the shared crypto module referenced argon2 and that pulls `node-gyp-build` and the Node builtins into the bundle. | Node hashers moved to `utils/crypto-node.ts`; the dry run now succeeds and CI runs it. |
+| 27 | Server | **No migration existed**, so a fresh database had no tables. | Baseline generated and tracked, and the tests now apply it rather than a hand-written copy of the schema. |
+| 28 | Server | **Refresh rotation was not atomic**, so two requests with the same token both issued replacements. | The claim is one statement; four tests. |
+| 29 | Repo | **The Docker image could not build**: the compose context was `packages/server` while the lockfile and workspace manifest live at the repository root. | Workspace-aware build from the root context. Reasoned, not observed — no Docker here. |
+| 30 | Repo | **A release could be built from a revision CI never saw**, and saving a row could be reported as failed after it committed. | The release requires passing checks for the exact commit; the metadata write is best-effort and named as such. |
 
-## Open — highest severity
+## Open
 
-### Rust backend
+Two things, both needing a decision rather than a patch:
 
-- **The local encryption key is a plain file beside the database.** `.termix_key` contains
-  the raw AES key (Base64) in the application-data directory, so copying that directory
-  yields every stored password and private key. The AES-GCM use itself is correct —
-  nonces are random, tampering is rejected — this is the key-storage design. The platform
-  credential store is the fix.
-- Medium: dead sessions stay in the session maps after a remote disconnect; a blocked PTY
-  write holds the global lock; naturally-exited local shells are never reaped; every
-  migration error is treated as "column already exists"; save/delete commands update sync
-  metadata outside the main write; global proxy credentials sync as machine-specific
-  ciphertext; pull reports success when every fetch failed; copying a directory into its
-  own descendant copies its own output; `ALL_PROXY=socks5://…` keeps its scheme on
-  non-Windows, so a SOCKS proxy set that way is never reached.
+- **The local encryption key is still an ordinary file beside the database.** It is private
+  to the owning user now, but it remains the sole protection for every stored password and
+  private key, so copying the application-data directory still yields them. Moving it into
+  the platform credential store is the fix, and it needs a migration for existing installs —
+  a wrong one loses every stored credential, which is why it is not being rushed.
+- **Applying migrations to D1 is still a manual step.** The baseline exists and the SQLite
+  path applies it, but D1 wants `wrangler d1 migrations apply` and Drizzle's folder layout
+  is not wrangler's. Nothing documents the bridge yet.
 
-### Server
+Beyond those, the remaining items are small and were reported rather than fixed: the medium
+notes below were all addressed, so what is left is the pair above plus anything a future
+review finds.
 
-- **The Docker build cannot find the lockfile.** `docker-compose.yml` uses `build: .`
-  with the context at `packages/server`, while `Dockerfile` COPYs `pnpm-lock.yaml`, which
-  lives at the repository root. The image cannot build. Not fixed here: Docker is
-  unavailable in this environment, and an unverified Dockerfile change is worse than a
-  build that fails clearly.
-- **The Worker dependency graph still reaches native Node modules.** `services/crypto.ts`
-  dynamically imports `argon2` for verifying migrated hashes; Workers cannot run the
-  addon, so those accounts cannot authenticate there. The database half of this was fixed
-  as part of the typecheck work.
-- **No migration history is checked in.** `drizzle/` is gitignored and no migration files
-  exist, so a fresh database has no tables — the server tests write the schema out by hand
-  for that reason — and schema changes ship through undocumented external steps.
-- Medium: refresh rotation is not atomic; a release does not require CI success for the
-  commit it builds; the client package still has no tests.
+### Smaller, not addressed
 
-### Frontend
-
-Nothing open. The two defects found in this area are fixed — see rows 16 and 17.
+- The dead-field `#[allow(dead_code)]` on DB methods for incremental sync that nothing calls.
+- A WebDAV response is buffered in full with no size limit, unlike SFTP transfers.
+- PBKDF2 records store no per-record work factor, so the iteration count cannot be raised
+  without invalidating existing passwords.
 
 ## Verification notes
 
