@@ -3,6 +3,7 @@ use tauri::State;
 
 use crate::services::crypto;
 use crate::services::db::Database;
+use crate::services::proxy::{ProxyConfig, ProxyMode};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +22,16 @@ pub struct AppSettings {
     pub webdav_remote_dir: String,
     #[serde(default)]
     pub sync_encryption_password: String,
+    /// Retry an SSH session automatically when it drops unexpectedly.
+    #[serde(default = "default_true")]
+    pub auto_reconnect: bool,
+    /// Where connections go by default: direct, the OS proxy, or a fixed proxy.
+    #[serde(default)]
+    pub proxy: ProxyMode,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AppSettings {
@@ -38,6 +49,8 @@ impl Default for AppSettings {
             webdav_password: String::new(),
             webdav_remote_dir: "/termix".to_string(),
             sync_encryption_password: String::new(),
+            auto_reconnect: true,
+            proxy: ProxyMode::Direct,
         }
     }
 }
@@ -47,6 +60,9 @@ pub async fn get_settings(db: State<'_, Database>) -> Result<AppSettings, String
     let mut s = db.get_settings().await.map_err(|e| e.to_string())?;
     s.webdav_password = crypto::decrypt(&s.webdav_password).unwrap_or_default();
     s.sync_encryption_password = crypto::decrypt(&s.sync_encryption_password).unwrap_or_default();
+    if let ProxyMode::Custom(config) = &mut s.proxy {
+        config.password = crypto::decrypt(&config.password).unwrap_or_default();
+    }
     Ok(s)
 }
 
@@ -57,5 +73,15 @@ pub async fn save_settings(
 ) -> Result<(), String> {
     settings.webdav_password = crypto::encrypt(&settings.webdav_password).map_err(|e| e.to_string())?;
     settings.sync_encryption_password = crypto::encrypt(&settings.sync_encryption_password).map_err(|e| e.to_string())?;
+    if let ProxyMode::Custom(config) = &mut settings.proxy {
+        config.password = crypto::encrypt(&config.password).map_err(|e| e.to_string())?;
+    }
     db.save_settings(&settings).await.map_err(|e| e.to_string())
+}
+
+/// What this machine's system proxy currently resolves to, so the UI can show it
+/// next to the "System" option instead of leaving the user guessing.
+#[tauri::command]
+pub fn get_system_proxy() -> Option<ProxyConfig> {
+    crate::services::proxy::system_proxy()
 }

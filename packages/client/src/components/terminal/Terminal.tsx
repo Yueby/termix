@@ -1,5 +1,6 @@
 import { useContextMenu } from "@/hooks/use-context-menu";
 import { useSnippetAutocomplete } from "@/hooks/use-snippet-autocomplete";
+import { copyToClipboard, readFromClipboard } from "@/lib/clipboard";
 import { createLogger } from "@/lib/logger";
 import { attachConsumer, detachConsumer } from "@/lib/session-data-bridge";
 import { localResize, localWrite, sshResize, sshWrite } from "@/lib/tauri";
@@ -8,7 +9,6 @@ import { getThemeById } from "@/lib/terminal-themes";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSnippetStore } from "@/stores/snippet-store";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { readText as clipboardRead, writeText as clipboardWrite } from "@tauri-apps/plugin-clipboard-manager";
 import { FitAddon } from "@xterm/addon-fit";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
@@ -295,22 +295,21 @@ export function TerminalView({
 
   const handleCopy = useCallback(() => {
     const sel = xtermRef.current?.getSelection();
-    if (sel) clipboardWrite(sel).catch((e) => logger.warn("copy failed:", e));
+    if (sel) void copyToClipboard(sel);
     closeTermMenu();
     requestAnimationFrame(focusTerminal);
   }, [focusTerminal]);
 
   const handlePaste = useCallback(() => {
-    clipboardRead().then((text) => {
-      if (text && xtermRef.current) {
-        xtermRef.current.paste(text);
-        xtermRef.current.clearSelection();
-        xtermRef.current.scrollToBottom();
-        xtermRef.current.focus();
-      }
-    }).catch((e) => logger.warn("paste failed:", e));
+    void readFromClipboard().then((text) => {
+      if (!text || !xtermRef.current) return;
+      xtermRef.current.paste(text);
+      xtermRef.current.clearSelection();
+      xtermRef.current.scrollToBottom();
+      xtermRef.current.focus();
+    });
     closeTermMenu();
-  }, []);
+  }, [closeTermMenu]);
 
   const handleSelectAll = useCallback(() => {
     xtermRef.current?.selectAll();

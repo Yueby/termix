@@ -1,16 +1,41 @@
 import { createLogger } from "@/lib/logger";
+import { resolveProxyMode } from "@/lib/proxy";
 import { startBuffering, stopBuffering } from "@/lib/session-data-bridge";
 import { detectShells, localClose, localOpen, saveTerminalLog, sshConnect, sshDisconnect } from "@/lib/tauri";
 import { getTerminalCreatedAt, serializeTerminal } from "@/lib/terminal-registry";
 import { useConnectionStore, type ConnectionInfo } from "@/stores/connection-store";
 import { useKeychainStore } from "@/stores/keychain-store";
-import { useSessionStore } from "@/stores/session-store";
+import { useSessionStore, type SessionTab } from "@/stores/session-store";
 import { useSettingsStore } from "@/stores/settings-store";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 
 const logger = createLogger("connection");
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** How often a dropped SSH session is retried before it is left disconnected. */
+const AUTO_RECONNECT_MAX_ATTEMPTS = 3;
+
+/** First retry delay; doubles per attempt (1s, 2s, 4s). */
+const AUTO_RECONNECT_BASE_DELAY_MS = 1000;
+
+/** Stand-in connection for a tab whose saved connection record is gone. */
+function connectionForTab(tab: SessionTab): ConnectionInfo {
+  return {
+    id: tab.connectionId,
+    name: tab.title,
+    host: tab.host,
+    port: tab.port,
+    username: tab.username,
+    authType: tab.authType,
+    group: "",
+    password: "",
+    keyPath: "",
+    keyPassphrase: "",
+    keychainId: "",
+    proxy: null,
+  };
+}
 
 export function useConnectionHandlers() {
   const { addTab, updateTab, removeTab } = useSessionStore();
@@ -29,6 +54,11 @@ export function useConnectionHandlers() {
 
       pushLog(`Authenticating as ${conn.username} (${conn.authType})...`);
       updateTab(tabId, { status: "authenticating" });
+
+      // The session id is generated here so the data channel is registered before
+      // the backend can start producing output.
+      const sessionId = crypto.randomUUID();
+      const onData = startBuffering(sessionId);
 
       try {
         let authMethod: { type: "password"; password: string } | { type: "key"; key_path: string; passphrase?: string } | { type: "key_content"; key_content: string; passphrase?: string };
@@ -55,16 +85,18 @@ export function useConnectionHandlers() {
           authMethod = { type: "key", key_path: conn.keyPath ?? "", passphrase: password || undefined };
         }
 
-        const result = await sshConnect({
+        const result = await sshConnect(sessionId, {
           host: conn.host,
           port: conn.port,
           username: conn.username,
           auth_method: authMethod,
-        });
+          proxy: resolveProxyMode(conn.proxy, useSettingsStore.getState().proxy),
+        }, onData);
 
-        startBuffering(result.session_id, "ssh_data");
         pushLog("Session established.");
         updateTab(tabId, { status: "connected", sessionId: result.session_id });
+        // The session is healthy again, so the retry budget resets.
+        reconnectAttempts.current.delete(tabId);
 
         if (conn.id && password) {
           useConnectionStore.getState().updateConnection(conn.id, {
@@ -73,11 +105,39 @@ export function useConnectionHandlers() {
           });
         }
       } catch (err) {
+        stopBuffering(sessionId);
         pushLog(`Error: ${String(err)}`);
         updateTab(tabId, { status: "error", error: String(err) });
       }
     },
     [updateTab]
+  );
+
+  const reconnectAttempts = useRef<Map<string, number>>(new Map());
+  const reconnectTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  /** Drops any pending retry for a tab, used when it closes. */
+  const cancelReconnect = useCallback((tabId: string) => {
+    const timer = reconnectTimers.current.get(tabId);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      reconnectTimers.current.delete(tabId);
+    }
+    reconnectAttempts.current.delete(tabId);
+  }, []);
+
+  /** Re-opens a tab with its stored connection and credentials. */
+  const reconnectTab = useCallback(
+    (tabId: string) => {
+      const tab = useSessionStore.getState().tabs.find((t) => t.id === tabId);
+      if (!tab) return;
+      const conn =
+        useConnectionStore.getState().connections.find((c) => c.id === tab.connectionId) ??
+        connectionForTab(tab);
+      const credential = conn.authType === "password" ? conn.password : conn.keyPassphrase;
+      doConnect(tabId, conn, credential ?? "");
+    },
+    [doConnect]
   );
 
   const handleConnect = useCallback(
@@ -128,7 +188,7 @@ export function useConnectionHandlers() {
         doConnect(tabId, {
           id: tab.connectionId, name: tab.title, host: tab.host,
           port: tab.port, username: tab.username, authType: tab.authType, group: "",
-          password: "", keyPath: "", keyPassphrase: "", keychainId: "",
+          password: "", keyPath: "", keyPassphrase: "", keychainId: "", proxy: null,
         }, password);
       }
     },
@@ -136,8 +196,24 @@ export function useConnectionHandlers() {
   );
 
   const handleRetry = useCallback(
-    (tabId: string) => updateTab(tabId, { status: "waiting_auth", error: null, sessionId: null }),
-    [updateTab]
+    (tabId: string) => {
+      cancelReconnect(tabId);
+      const tab = useSessionStore.getState().tabs.find((t) => t.id === tabId);
+      const conn = tab
+        ? useConnectionStore.getState().connections.find((c) => c.id === tab.connectionId)
+        : undefined;
+      // Stored credentials mean we can just go again; otherwise prompt, because
+      // asking for a password is the only way forward.
+      const canRetrySilently =
+        !!conn &&
+        (conn.authType === "password" ? !!conn.password : !!(conn.keychainId || conn.keyPath));
+      if (canRetrySilently) {
+        reconnectTab(tabId);
+      } else {
+        updateTab(tabId, { status: "waiting_auth", error: null, sessionId: null });
+      }
+    },
+    [updateTab, reconnectTab, cancelReconnect]
   );
 
   const handleDisconnect = useCallback(
@@ -145,9 +221,40 @@ export function useConnectionHandlers() {
       stopBuffering(sessionId);
       const { tabs: currentTabs, updateTab: update } = useSessionStore.getState();
       const tab = currentTabs.find((t) => t.sessionId === sessionId);
-      if (tab) update(tab.id, { status: "disconnected", error: reason, sessionId: null });
+      if (!tab) return;
+
+      // A local terminal ends because its process exited; retrying would only
+      // spawn another shell, so only SSH sessions are retried.
+      const retryable =
+        tab.type === "terminal" && useSettingsStore.getState().autoReconnect;
+      const attempt = (reconnectAttempts.current.get(tab.id) ?? 0) + 1;
+
+      if (!retryable || attempt > AUTO_RECONNECT_MAX_ATTEMPTS) {
+        update(tab.id, { status: "disconnected", error: reason, sessionId: null });
+        return;
+      }
+
+      reconnectAttempts.current.set(tab.id, attempt);
+      const delayMs = AUTO_RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1);
+      const note = `Disconnected: ${reason} Retrying in ${delayMs / 1000}s (attempt ${attempt}/${AUTO_RECONNECT_MAX_ATTEMPTS}).`;
+      update(tab.id, {
+        sessionId: null,
+        status: "connecting",
+        error: reason,
+        logs: [...(tab.logs ?? []), `[${new Date().toLocaleTimeString()}] ${note}`],
+      });
+
+      reconnectTimers.current.set(
+        tab.id,
+        setTimeout(() => {
+          reconnectTimers.current.delete(tab.id);
+          // The tab may have been closed while we were waiting.
+          if (!useSessionStore.getState().tabs.some((t) => t.id === tab.id)) return;
+          reconnectTab(tab.id);
+        }, delayMs)
+      );
     },
-    []
+    [reconnectTab]
   );
 
   const disconnectTab = useCallback(async (tab: { sessionId: string | null; type: string; id: string }) => {
@@ -186,28 +293,29 @@ export function useConnectionHandlers() {
     async (tabId: string) => {
       const { tabs: currentTabs } = useSessionStore.getState();
       const tab = currentTabs.find((t) => t.id === tabId);
+      cancelReconnect(tabId);
       if (tab) captureAndSaveLog(tab);
       removeTab(tabId);
       if (tab) await disconnectTab(tab);
     },
-    [removeTab, disconnectTab, captureAndSaveLog]
+    [removeTab, disconnectTab, captureAndSaveLog, cancelReconnect]
   );
 
   const handleCloseOtherTabs = useCallback(
     async (keepTabId: string) => {
       const { tabs: currentTabs, removeOtherTabs } = useSessionStore.getState();
       const others = currentTabs.filter((t) => t.id !== keepTabId);
-      others.forEach((t) => captureAndSaveLog(t));
+      others.forEach((t) => { cancelReconnect(t.id); captureAndSaveLog(t); });
       removeOtherTabs(keepTabId);
       await Promise.all(others.map(disconnectTab));
     },
-    [disconnectTab, captureAndSaveLog]
+    [disconnectTab, captureAndSaveLog, cancelReconnect]
   );
 
   const handleCloseAllTabs = useCallback(
     async () => {
       const { tabs: currentTabs, removeAllTabs } = useSessionStore.getState();
-      currentTabs.forEach((t) => captureAndSaveLog(t));
+      currentTabs.forEach((t) => { cancelReconnect(t.id); captureAndSaveLog(t); });
       removeAllTabs();
       await Promise.all(currentTabs.map(disconnectTab));
     },
@@ -229,8 +337,9 @@ export function useConnectionHandlers() {
         }
       }
 
-      const result = await localOpen(80, 24, shell, shellArgs);
-      startBuffering(result.session_id, "local_data");
+      const sessionId = crypto.randomUUID();
+      const onData = startBuffering(sessionId);
+      const result = await localOpen(sessionId, onData, 80, 24, shell, shellArgs);
 
       const tabId = crypto.randomUUID();
       const currentTabs = useSessionStore.getState().tabs;

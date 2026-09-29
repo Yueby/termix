@@ -5,14 +5,9 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
-
-#[derive(Clone, Serialize)]
-pub struct LocalDataEvent {
-    pub session_id: String,
-    pub data: Vec<u8>,
-}
 
 #[derive(Clone, Serialize)]
 pub struct LocalDisconnectEvent {
@@ -49,13 +44,13 @@ impl LocalTerminalManager {
     pub async fn spawn(
         &self,
         app: AppHandle,
+        session_id: String,
         cols: u16,
         rows: u16,
         shell: Option<String>,
         shell_args: Option<Vec<String>>,
+        on_data: Channel<InvokeResponseBody>,
     ) -> Result<String> {
-        let session_id = uuid::Uuid::new_v4().to_string();
-
         let pty_system = native_pty_system();
         let pair = pty_system.openpty(PtySize {
             rows,
@@ -96,26 +91,34 @@ impl LocalTerminalManager {
             std::thread::sleep(std::time::Duration::from_millis(200));
             let mut reader = reader;
             let mut buf = [0u8; 8192];
-            loop {
+            let mut delivery_failures: u64 = 0;
+            let reason = loop {
                 match reader.read(&mut buf) {
-                    Ok(0) => break,
+                    Ok(0) => break "the shell exited".to_string(),
                     Ok(n) => {
-                        let event = LocalDataEvent {
-                            session_id: sid.clone(),
-                            data: buf[..n].to_vec(),
-                        };
-                        if app.emit("local_data", &event).is_err() {
-                            break;
+                        // Raw bytes over the channel: the webview gets an ArrayBuffer.
+                        if let Err(error) = on_data.send(InvokeResponseBody::Raw(buf[..n].to_vec()))
+                        {
+                            // A missed delivery is not the process exiting: keep reading.
+                            delivery_failures += 1;
+                            if delivery_failures == 1 {
+                                log::warn!(
+                                    "Session {sid}: could not deliver output to the frontend: {error}"
+                                );
+                            }
                         }
                     }
-                    Err(_) => break,
+                    Err(error) => break format!("could not read from the terminal: {error}"),
                 }
-            }
+            };
+            log::info!(
+                "Local session {sid} ended: {reason} (undelivered output chunks: {delivery_failures})"
+            );
             let _ = app.emit(
                 "local_disconnect",
                 &LocalDisconnectEvent {
                     session_id: sid,
-                    reason: "Process exited".to_string(),
+                    reason,
                 },
             );
         });

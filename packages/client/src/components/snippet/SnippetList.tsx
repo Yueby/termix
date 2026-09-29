@@ -1,14 +1,12 @@
 import { ListPage } from "@/components/layout/ListPage";
 import { Button } from "@/components/ui/button";
-import { createLogger } from "@/lib/logger";
+import { copyToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { useContextMenu } from "@/hooks/use-context-menu";
 import { isSnippetEmpty, useSnippetStore, type Snippet } from "@/stores/snippet-store";
 import { useUiStore } from "@/stores/ui-store";
 import { Code2, Copy, Pencil, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-
-const logger = createLogger("snippet");
 
 export function SnippetList() {
   const { snippets } = useSnippetStore();
@@ -59,7 +57,7 @@ export function SnippetList() {
   }, [setSelectedSnippetId, setEditingSnippetId]);
 
   const handleCopy = (content: string) => {
-    navigator.clipboard.writeText(content).catch((e) => logger.warn("Clipboard write failed:", e));
+    void copyToClipboard(content);
   };
 
   const deleteSnippet = snippets.find((s) => s.id === deleteTarget);

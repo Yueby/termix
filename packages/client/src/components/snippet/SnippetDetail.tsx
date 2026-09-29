@@ -5,13 +5,11 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
-import { createLogger } from "@/lib/logger";
+import { copyToClipboard } from "@/lib/clipboard";
 import { isSnippetEmpty, useSnippetStore, type Snippet } from "@/stores/snippet-store";
 import { useUiStore } from "@/stores/ui-store";
 import { Code2, Copy, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-
-const logger = createLogger("snippet");
 
 export function SnippetDetail() {
   const { editingSnippetId } = useUiStore();
@@ -81,7 +79,7 @@ export function SnippetDetail() {
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(content).catch((e) => logger.warn("Clipboard write failed:", e));
+    void copyToClipboard(content);
   };
 
   return (

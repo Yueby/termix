@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENBRDIxOTJDOEQwQjMzQTkKUldTcE13dU5MQm5TeXVXYmhpNm5kT3htTGZIaW5nRFczbzBCSlhYK2w0bjV0TE5kVmkvNCtQUnEK",
       "endpoints": [
         "https://github.com/Yueby/termix/releases/latest/download/latest.json"
       ],

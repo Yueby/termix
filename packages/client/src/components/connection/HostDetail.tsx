@@ -15,13 +15,15 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { importKeyFile } from "@/lib/tauri";
+import { defaultCustomProxy, describeConnectionProxy } from "@/lib/proxy";
+import { importKeyFile, type ProxyKind, type ProxyMode } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import {
     useConnectionStore,
     type ConnectionInfo,
 } from "@/stores/connection-store";
 import { useKeychainStore } from "@/stores/keychain-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useUiStore } from "@/stores/ui-store";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Check, Eye, EyeOff, FolderOpen, Import, KeyRound, PanelRightClose, Plus, Server, X } from "lucide-react";
@@ -36,6 +38,9 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
   const { editingHostId } = useUiStore();
   const { connections, groups, updateConnection } = useConnectionStore();
   const { items: keychainItems } = useKeychainStore();
+  const globalProxy = useSettingsStore((s) => s.proxy);
+  const systemProxy = useSettingsStore((s) => s.systemProxy);
+  const refreshSystemProxy = useSettingsStore((s) => s.refreshSystemProxy);
 
   const conn = connections.find((c) => c.id === editingHostId);
 
@@ -49,7 +54,9 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
   const [keyPath, setKeyPath] = useState("");
   const [keyPassphrase, setKeyPassphrase] = useState("");
   const [keychainId, setKeychainId] = useState("");
+  const [proxy, setProxy] = useState<ProxyMode | null>(conn?.proxy ?? null);
   const [showPassword, setShowPassword] = useState(false);
+  const [showProxyPassword, setShowProxyPassword] = useState(false);
   const [keyPickerOpen, setKeyPickerOpen] = useState(false);
   const [groupPickerOpen, setGroupPickerOpen] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
@@ -67,10 +74,16 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
       setKeyPath(conn.keyPath ?? "");
       setKeyPassphrase(conn.keyPassphrase ?? "");
       setKeychainId(conn.keychainId ?? "");
+      setProxy(conn.proxy ?? null);
       setShowPassword(false);
+      setShowProxyPassword(false);
       setKeyPickerOpen(false);
     }
   }, [editingHostId, conn?.id]);
+
+  useEffect(() => {
+    void refreshSystemProxy();
+  }, [refreshSystemProxy, editingHostId]);
 
   if (!conn) {
     return (
@@ -140,6 +153,7 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
       keyPath: authType === "key" ? keyPath : undefined,
       keyPassphrase: authType === "key" ? keyPassphrase : undefined,
       keychainId: authType === "key" ? keychainId : "",
+      proxy,
     });
 
     const ui = useUiStore.getState();
@@ -158,7 +172,7 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
         }
       });
     } else {
-      onConnect({ ...conn, name, host, port, username, authType, group, password, keyPath, keyPassphrase, keychainId });
+      onConnect({ ...conn, name, host, port, username, authType, group, password, keyPath, keyPassphrase, keychainId, proxy });
     }
   };
 
@@ -376,6 +390,145 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
                   value={keyPassphrase}
                   onChange={(e) => { setKeyPassphrase(e.target.value); save({ keyPassphrase: e.target.value }); }}
                 />
+              </div>
+            )}
+          </section>
+
+          <Separator />
+
+          <section className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground uppercase tracking-wider">Proxy</Label>
+              <span
+                className="text-xs text-muted-foreground truncate max-w-[210px]"
+                title={describeConnectionProxy(proxy, globalProxy, systemProxy)}
+              >
+                {describeConnectionProxy(proxy, globalProxy, systemProxy)}
+              </span>
+            </div>
+
+            <Select
+              value={proxy === null ? "inherit" : proxy.mode}
+              onValueChange={(val) => {
+                let updated: ProxyMode | null;
+                if (val === "inherit") {
+                  updated = null;
+                } else if (val === "direct") {
+                  updated = { mode: "direct" };
+                } else if (val === "system") {
+                  updated = { mode: "system" };
+                  void refreshSystemProxy();
+                } else {
+                  const seed = globalProxy.mode === "custom" ? globalProxy : systemProxy;
+                  updated = defaultCustomProxy(seed);
+                }
+                setProxy(updated);
+                save({ proxy: updated });
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="inherit">Follow Global</SelectItem>
+                <SelectItem value="direct">Direct</SelectItem>
+                <SelectItem value="system">System proxy</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {proxy?.mode === "custom" && (
+              <div className="space-y-3 pt-1">
+                <div className="flex gap-2">
+                  <div className="w-[110px] shrink-0">
+                    <Select
+                      value={proxy.kind}
+                      onValueChange={(val: ProxyKind) => {
+                        if (proxy.mode === "custom") {
+                          const updated: ProxyMode = { ...proxy, kind: val };
+                          setProxy(updated);
+                          save({ proxy: updated });
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="socks5">SOCKS5</SelectItem>
+                        <SelectItem value="http">HTTP</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Input
+                    className="flex-1 min-w-0"
+                    placeholder="Proxy host"
+                    value={proxy.host}
+                    onChange={(e) => {
+                      if (proxy.mode === "custom") {
+                        const updated: ProxyMode = { ...proxy, host: e.target.value };
+                        setProxy(updated);
+                        save({ proxy: updated });
+                      }
+                    }}
+                  />
+                  <Input
+                    className="w-20 shrink-0 text-center"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    placeholder="Port"
+                    value={proxy.port || ""}
+                    onChange={(e) => {
+                      if (proxy.mode === "custom") {
+                        const v = parseInt(e.target.value, 10);
+                        const updated: ProxyMode = {
+                          ...proxy,
+                          port: Number.isNaN(v) ? 0 : Math.min(65535, Math.max(0, v)),
+                        };
+                        setProxy(updated);
+                        save({ proxy: updated });
+                      }
+                    }}
+                  />
+                </div>
+
+                <Input
+                  placeholder="Proxy username (optional)"
+                  value={proxy.username || ""}
+                  onChange={(e) => {
+                    if (proxy.mode === "custom") {
+                      const updated: ProxyMode = { ...proxy, username: e.target.value };
+                      setProxy(updated);
+                      save({ proxy: updated });
+                    }
+                  }}
+                />
+
+                <div className="relative">
+                  <Input
+                    type={showProxyPassword ? "text" : "password"}
+                    placeholder="Proxy password (optional)"
+                    className="pr-9"
+                    value={proxy.password || ""}
+                    onChange={(e) => {
+                      if (proxy.mode === "custom") {
+                        const updated: ProxyMode = { ...proxy, password: e.target.value };
+                        setProxy(updated);
+                        save({ proxy: updated });
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7"
+                    onClick={() => setShowProxyPassword(!showProxyPassword)}
+                  >
+                    {showProxyPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
               </div>
             )}
           </section>

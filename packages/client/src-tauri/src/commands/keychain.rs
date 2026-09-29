@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
-use ssh_key::{Algorithm, LineEnding, PrivateKey as SshPrivateKey};
+// Use russh's own ssh-key re-export so the key types can never drift from the
+// version russh was built against.
+use russh::keys::ssh_key::{Algorithm, EcdsaCurve, LineEnding, PrivateKey as SshPrivateKey};
 use tauri::State;
 
 use crate::services::db::Database;
@@ -75,25 +77,25 @@ pub async fn generate_ssh_key(
     key_type: String,
     bits: Option<u32>,
 ) -> Result<GeneratedKey, String> {
-    use aes_gcm::aead::OsRng;
+    use getrandom::{rand_core::UnwrapErr, SysRng};
 
     let (algorithm, type_label) = match key_type.as_str() {
         "ed25519" => (Algorithm::Ed25519, "ed25519"),
         "ecdsa-256" | "ecdsa256" => (
             Algorithm::Ecdsa {
-                curve: ssh_key::EcdsaCurve::NistP256,
+                curve: EcdsaCurve::NistP256,
             },
             "ecdsa-sha2-nistp256",
         ),
         "ecdsa-384" | "ecdsa384" => (
             Algorithm::Ecdsa {
-                curve: ssh_key::EcdsaCurve::NistP384,
+                curve: EcdsaCurve::NistP384,
             },
             "ecdsa-sha2-nistp384",
         ),
         "ecdsa-521" | "ecdsa521" => (
             Algorithm::Ecdsa {
-                curve: ssh_key::EcdsaCurve::NistP521,
+                curve: EcdsaCurve::NistP521,
             },
             "ecdsa-sha2-nistp521",
         ),
@@ -104,7 +106,7 @@ pub async fn generate_ssh_key(
         _ => return Err(format!("Unsupported key type: {}", key_type)),
     };
 
-    let key = SshPrivateKey::random(&mut OsRng, algorithm)
+    let key = SshPrivateKey::random(&mut UnwrapErr(SysRng), algorithm)
         .map_err(|e| format!("Key generation failed: {}", e))?;
 
     let private_key_str = key

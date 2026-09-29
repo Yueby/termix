@@ -1,5 +1,6 @@
 pub mod ssh_manager;
 pub mod sftp_manager;
+pub mod proxy;
 pub mod local_terminal;
 pub mod db;
 pub mod crypto;

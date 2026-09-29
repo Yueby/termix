@@ -1,4 +1,5 @@
 use serde::Serialize;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, State};
 
 use crate::services::local_terminal::{LocalTerminalManager, ShellProfile};
@@ -11,14 +12,16 @@ pub struct LocalOpenResult {
 #[tauri::command]
 pub async fn local_open(
     app: AppHandle,
+    session_id: String,
     cols: u16,
     rows: u16,
     shell: Option<String>,
     shell_args: Option<Vec<String>>,
+    on_data: Channel<InvokeResponseBody>,
     local_manager: State<'_, LocalTerminalManager>,
 ) -> Result<LocalOpenResult, String> {
     let session_id = local_manager
-        .spawn(app, cols, rows, shell, shell_args)
+        .spawn(app, session_id, cols, rows, shell, shell_args, on_data)
         .await
         .map_err(|e| e.to_string())?;
     Ok(LocalOpenResult { session_id })

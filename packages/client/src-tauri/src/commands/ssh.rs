@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, State};
 
 use crate::services::ssh_manager::SshManager;
+
+use crate::services::proxy::ProxyMode;
 
 #[derive(Debug, Deserialize)]
 pub struct ConnectPayload {
@@ -9,6 +12,9 @@ pub struct ConnectPayload {
     pub port: u16,
     pub username: String,
     pub auth_method: AuthMethod,
+    /// Already resolved against the connection's own choice and the global default.
+    #[serde(default)]
+    pub proxy: ProxyMode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,16 +42,21 @@ pub struct ConnectResult {
 #[tauri::command]
 pub async fn ssh_connect(
     app: AppHandle,
+    session_id: String,
     payload: ConnectPayload,
+    on_data: Channel<InvokeResponseBody>,
     ssh_manager: State<'_, SshManager>,
 ) -> Result<ConnectResult, String> {
     let session_id = ssh_manager
         .connect(
             app,
+            session_id,
             &payload.host,
             payload.port,
             &payload.username,
             payload.auth_method,
+            &payload.proxy,
+            on_data,
         )
         .await
         .map_err(|e| {

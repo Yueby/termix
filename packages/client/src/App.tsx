@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useConnectionHandlers } from "@/hooks/use-connection";
+import { readFromClipboard } from "@/lib/clipboard";
 import { getThemeById } from "@/lib/terminal-themes";
 import { cn } from "@/lib/utils";
 import { useConnectionStore } from "@/stores/connection-store";
@@ -40,8 +41,8 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useUpdateStore } from "@/hooks/use-updater";
 import { focusTerminal, pasteToTerminal } from "@/lib/terminal-registry";
 import { localWrite, sshWrite } from "@/lib/tauri";
-import { readText as clipboardRead } from "@tauri-apps/plugin-clipboard-manager";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Toaster } from "@/components/ui/toaster";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Download, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -293,12 +294,11 @@ function App() {
                           }}
                           onToggleKeyboard={() => focusTerminal(tab.id)}
                           onPaste={() => {
-                            clipboardRead().then((text) => {
-                              if (text) {
-                                pasteToTerminal(tab.id, text);
-                                focusTerminal(tab.id);
-                              }
-                            }).catch((e) => console.warn("clipboard read failed:", e));
+                            void readFromClipboard().then((text) => {
+                              if (!text) return;
+                              pasteToTerminal(tab.id, text);
+                              focusTerminal(tab.id);
+                            });
                           }}
                         />
                       </div>
@@ -448,6 +448,7 @@ function App() {
           </AlertDialogContent>
         </AlertDialog>
       </div>
+      <Toaster />
     </TooltipProvider>
   );
 }

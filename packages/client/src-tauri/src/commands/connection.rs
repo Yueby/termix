@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::services::db::Database;
+use crate::services::proxy::ProxyMode;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +22,9 @@ pub struct ConnectionInfo {
     pub key_passphrase: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub keychain_id: String,
+    /// `None` follows the global default; otherwise this connection decides.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy: Option<ProxyMode>,
 }
 
 #[tauri::command]

@@ -1,10 +1,6 @@
 {
   "private": true,
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
+  "packageManager": "pnpm@11.21.0",
   "scripts": {
     "dev": "pnpm --filter @termix/client dev",
     "build": "pnpm --filter @termix/client build",

@@ -18,14 +18,18 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-russh = "0.46"
-russh-keys = "0.46"
-russh-sftp = "2"
+russh = "0.63"
+russh-sftp = "3"
+tokio-socks = "0.5"
+async-http-proxy = { version = "1.2", features = ["runtime-tokio", "basic-auth"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
-aes-gcm = "0.10"
-ssh-key = { version = "0.6", features = ["ed25519", "p256", "p384", "p521", "rsa", "rand_core", "std", "getrandom", "encryption"] }
-argon2 = "0.5"
-base64 = "0.22"
+aes-gcm = "0.11"
+# rand_core 0.10 dropped its OS-backed RNG; `getrandom::SysRng` is the documented
+# replacement, and wrapping it in `UnwrapErr` gives the infallible `CryptoRng` that
+# ssh-key asks for. getrandom is already in the tree, so no new crate arrives.
+getrandom = { version = "0.4", features = ["sys_rng"] }
+argon2 = "0.6"
+base64 = "0.23"
 reqwest = { version = "0.12", features = ["json"] }
 uuid = { version = "1", features = ["v4"] }
 log = "0.4"
@@ -34,10 +38,16 @@ anyhow = "1"
 async-trait = "0.1"
 parking_lot = "0.12"
 portable-pty = "0.9"
-dirs = "6"
+dirs = "7"
 tauri-plugin-dialog = "2.6.0"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-os = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+
+# Desktop clients read the OS proxy from the registry (the HTTP_PROXY env vars are
+# a command-line convention). Already in the tree via tauri, so this adds no new
+# transitive dependency.
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"

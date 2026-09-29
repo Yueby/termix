@@ -76,7 +76,7 @@ export function HostList({ onConnect, onOpenLocal, onSwitchEdit }: HostListProps
     useConnectionStore.getState().addConnection({
       id, name: "", host: "", port: 22,
       username: "root", authType: "password", group: "Default",
-      password: "", keyPath: "", keyPassphrase: "", keychainId: "",
+      password: "", keyPath: "", keyPassphrase: "", keychainId: "", proxy: null,
     });
     setSelectedHostId(id);
     setEditingHostId(id);
@@ -118,7 +118,7 @@ export function HostList({ onConnect, onOpenLocal, onSwitchEdit }: HostListProps
       id: crypto.randomUUID(),
       name: `${username}@${host}`,
       host, port, username, authType: "password", group: "Quick Connect",
-      password: "", keyPath: "", keyPassphrase: "", keychainId: "",
+      password: "", keyPath: "", keyPassphrase: "", keychainId: "", proxy: null,
     });
   }, [search, onConnect]);
 

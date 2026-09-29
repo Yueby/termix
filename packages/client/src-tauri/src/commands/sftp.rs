@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::commands::ssh::AuthMethod;
+use crate::services::proxy::ProxyMode;
 use crate::services::sftp_manager::{FileEntry, SftpManager};
 
 #[derive(Debug, Serialize)]
@@ -15,6 +16,9 @@ pub struct SftpConnectPayload {
     pub port: u16,
     pub username: String,
     pub auth_method: AuthMethod,
+    /// Already resolved against the connection's own choice and the global default.
+    #[serde(default)]
+    pub proxy: ProxyMode,
 }
 
 #[tauri::command]
@@ -28,6 +32,7 @@ pub async fn sftp_connect(
             payload.port,
             &payload.username,
             payload.auth_method,
+            &payload.proxy,
         )
         .await
         .map_err(|e| {

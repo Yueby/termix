@@ -1,4 +1,23 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
+
+export type ProxyKind = "socks5" | "http";
+
+export interface ProxyConfig {
+  kind: ProxyKind;
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
+/**
+ * Where a connection sends its traffic. `system` means this operating system's own
+ * proxy settings, which only the backend can read.
+ */
+export type ProxyMode =
+  | { mode: "direct" }
+  | { mode: "system" }
+  | ({ mode: "custom" } & ProxyConfig);
 
 export interface ConnectPayload {
   host: string;
@@ -8,6 +27,8 @@ export interface ConnectPayload {
     | { type: "password"; password: string }
     | { type: "key"; key_path: string; passphrase?: string }
     | { type: "key_content"; key_content: string; passphrase?: string };
+  /** Already resolved: the connection's own mode or the global default. */
+  proxy?: ProxyMode;
 }
 
 export interface ConnectResult {
@@ -24,8 +45,12 @@ export interface FileEntry {
 }
 
 // SSH commands
-export const sshConnect = (payload: ConnectPayload) =>
-  invoke<ConnectResult>("ssh_connect", { payload });
+export const sshConnect = (
+  sessionId: string,
+  payload: ConnectPayload,
+  onData: Channel<ArrayBuffer>
+) =>
+  invoke<ConnectResult>("ssh_connect", { sessionId, payload, onData });
 
 export const sshDisconnect = (sessionId: string) =>
   invoke<void>("ssh_disconnect", { sessionId });
@@ -108,12 +133,21 @@ export interface ShellProfile {
 }
 
 export const localOpen = (
+  sessionId: string,
+  onData: Channel<ArrayBuffer>,
   cols: number,
   rows: number,
   shell?: string,
   shellArgs?: string[]
 ) =>
-  invoke<LocalOpenResult>("local_open", { cols, rows, shell: shell ?? null, shellArgs: shellArgs ?? null });
+  invoke<LocalOpenResult>("local_open", {
+    sessionId,
+    onData,
+    cols,
+    rows,
+    shell: shell ?? null,
+    shellArgs: shellArgs ?? null,
+  });
 
 export const detectShells = () =>
   invoke<ShellProfile[]>("detect_shells");
@@ -140,6 +174,8 @@ export interface ConnectionInfo {
   keyPath: string;
   keyPassphrase: string;
   keychainId: string;
+  /** `null` follows the global default; otherwise this connection decides. */
+  proxy: ProxyMode | null;
 }
 
 export const getConnections = () =>
@@ -165,10 +201,18 @@ export interface AppSettings {
   webdavPassword: string;
   webdavRemoteDir: string;
   syncEncryptionPassword: string;
+  /** Retry an SSH session automatically when it drops unexpectedly. */
+  autoReconnect: boolean;
+  /** Where connections go by default. */
+  proxy: ProxyMode;
 }
 
 export const getSettings = () =>
   invoke<AppSettings>("get_settings");
+
+/** What the OS proxy currently resolves to, for labelling the "System" option. */
+export const getSystemProxy = () =>
+  invoke<ProxyConfig | null>("get_system_proxy");
 
 export const saveSettings = (settings: AppSettings) =>
   invoke<void>("save_settings", { settings });

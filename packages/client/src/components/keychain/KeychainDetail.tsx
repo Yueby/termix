@@ -5,6 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { createLogger } from "@/lib/logger";
+import { detectKeyType, resolveKeyTypeLabel } from "@/lib/ssh-key-type";
 import { generateSshKey, importKeyFile } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { isKeychainItemEmpty, useKeychainStore, type KeychainItem } from "@/stores/keychain-store";
@@ -104,19 +105,20 @@ export function KeychainDetail() {
     try {
       const content = await importKeyFile(String(result));
       setPrivateKey(content);
+      const importedType = detectKeyType(content);
       if (!name) {
         const fileName = String(result).split(/[\\/]/).pop() ?? "";
         setName(fileName);
-        save({ privateKey: content, name: fileName });
+        save({ privateKey: content, name: fileName, keyType: importedType });
       } else {
-        save({ privateKey: content });
+        save({ privateKey: content, keyType: importedType });
       }
     } catch {
       // Error handled by Tauri
     }
   };
 
-  const keyTypeLabel = detectKeyTypeLabel(privateKey);
+  const keyTypeLabel = resolveKeyTypeLabel({ keyType: item.keyType, privateKey, publicKey });
 
   if (keychainGenerateMode) {
     const ecdsaCurves = [
@@ -355,14 +357,4 @@ export function KeychainDetail() {
       </ScrollArea>
     </div>
   );
-}
-
-function detectKeyTypeLabel(content: string): string {
-  if (!content) return "";
-  if (content.includes("RSA")) return "RSA";
-  if (content.includes("ED25519") || content.includes("ed25519")) return "Ed25519";
-  if (content.includes("EC") || content.includes("ECDSA")) return "ECDSA";
-  if (content.includes("OPENSSH")) return "OpenSSH";
-  if (content.includes("BEGIN")) return "PEM";
-  return "";
 }

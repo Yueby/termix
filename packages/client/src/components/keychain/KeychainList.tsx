@@ -7,6 +7,7 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useContextMenu } from "@/hooks/use-context-menu";
+import { detectKeyType, resolveKeyTypeLabel } from "@/lib/ssh-key-type";
 import { importKeyFile, type KeychainItem } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { isKeychainItemEmpty, useKeychainStore } from "@/stores/keychain-store";
@@ -166,7 +167,7 @@ export function KeychainList() {
                 {item.name || "Unnamed Key"}
               </span>
               <span className="text-xs text-muted-foreground truncate">
-                Type {formatKeyType(item.privateKey)}
+                Type {resolveKeyTypeLabel(item) || "SSH Key"}
               </span>
             </div>
             <Button
@@ -220,20 +221,4 @@ export function KeychainList() {
       )}
     </>
   );
-}
-
-function detectKeyType(content: string): string {
-  if (content.includes("RSA")) return "ssh-key";
-  if (content.includes("ED25519") || content.includes("ed25519")) return "ssh-key";
-  if (content.includes("EC") || content.includes("ECDSA")) return "ssh-key";
-  return "ssh-key";
-}
-
-function formatKeyType(content: string): string {
-  if (!content) return "SSH Key";
-  if (content.includes("RSA")) return "RSA";
-  if (content.includes("ED25519") || content.includes("ed25519")) return "Ed25519";
-  if (content.includes("EC") || content.includes("ECDSA")) return "ECDSA";
-  if (content.includes("OPENSSH")) return "OpenSSH";
-  return "SSH Key";
 }

@@ -8,6 +8,7 @@ use crate::commands::keychain::KeychainItem;
 use crate::commands::settings::AppSettings;
 use crate::commands::snippet::Snippet;
 use crate::services::crypto;
+use crate::services::proxy::ProxyMode;
 
 fn now_epoch() -> i64 {
     std::time::SystemTime::now()
@@ -48,6 +49,8 @@ impl Database {
                 encrypted_password TEXT DEFAULT '',
                 encrypted_key_path TEXT DEFAULT '',
                 encrypted_key_passphrase TEXT DEFAULT '',
+                proxy_choice TEXT NOT NULL DEFAULT '',
+                encrypted_proxy_password TEXT NOT NULL DEFAULT '',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             )",
@@ -125,6 +128,10 @@ impl Database {
         let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_passphrase TEXT DEFAULT ''")
             .execute(&self.pool).await;
         let _ = sqlx::query("ALTER TABLE connections ADD COLUMN keychain_id TEXT DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN proxy_choice TEXT NOT NULL DEFAULT ''")
+            .execute(&self.pool).await;
+        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_proxy_password TEXT NOT NULL DEFAULT ''")
             .execute(&self.pool).await;
 
         let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_private_key TEXT NOT NULL DEFAULT ''")
@@ -245,18 +252,20 @@ impl Database {
     // ── Connections ──
 
     pub async fn get_connections(&self) -> Result<Vec<ConnectionInfo>> {
-        let rows: Vec<(String, String, String, i32, String, String, String, String, String, String, String)> =
+        let rows: Vec<(String, String, String, i32, String, String, String, String, String, String, String, String, String)> =
             sqlx::query_as(
                 "SELECT id, name, host, port, username, auth_type, group_name,
                         encrypted_password, encrypted_key_path, encrypted_key_passphrase,
-                        COALESCE(keychain_id, '') as keychain_id
+                        COALESCE(keychain_id, '') as keychain_id,
+                        COALESCE(proxy_choice, '') as proxy_choice,
+                        COALESCE(encrypted_proxy_password, '') as encrypted_proxy_password
                  FROM connections ORDER BY name",
             )
             .fetch_all(&self.pool)
             .await?;
 
         let mut conns = Vec::with_capacity(rows.len());
-        for (id, name, host, port, username, auth_type, group, enc_pw, enc_kp, enc_kpp, keychain_id) in rows {
+        for (id, name, host, port, username, auth_type, group, enc_pw, enc_kp, enc_kpp, keychain_id, proxy_choice, enc_proxy_pw) in rows {
             let password = crypto::decrypt(&enc_pw).unwrap_or_else(|e| {
                 log::warn!("Failed to decrypt password for connection {}: {}", id, e);
                 String::new()
@@ -269,6 +278,18 @@ impl Database {
                 log::warn!("Failed to decrypt key_passphrase for connection {}: {}", id, e);
                 String::new()
             });
+            // The proxy password is stored apart from the mode so it can be encrypted.
+            let mut proxy: Option<ProxyMode> = if proxy_choice.trim().is_empty() {
+                None
+            } else {
+                serde_json::from_str(&proxy_choice).ok()
+            };
+            if let Some(ProxyMode::Custom(config)) = proxy.as_mut() {
+                config.password = crypto::decrypt(&enc_proxy_pw).unwrap_or_else(|e| {
+                    log::warn!("Failed to decrypt proxy password for connection {}: {}", id, e);
+                    String::new()
+                });
+            }
             conns.push(ConnectionInfo {
                 id,
                 name,
@@ -281,6 +302,7 @@ impl Database {
                 key_path,
                 key_passphrase,
                 keychain_id,
+                proxy,
             });
         }
         Ok(conns)
@@ -292,22 +314,38 @@ impl Database {
         let enc_kp = crypto::encrypt(&conn.key_path)?;
         let enc_kpp = crypto::encrypt(&conn.key_passphrase)?;
 
+        // Split the proxy password out of the mode so it can be encrypted at rest.
+        let mut proxy = conn.proxy.clone();
+        let proxy_password = match proxy.as_mut() {
+            Some(ProxyMode::Custom(config)) => std::mem::take(&mut config.password),
+            _ => String::new(),
+        };
+        let proxy_choice = match &proxy {
+            Some(mode) => serde_json::to_string(mode)?,
+            None => String::new(),
+        };
+        let enc_proxy_pw = crypto::encrypt(&proxy_password)?;
+
         sqlx::query(
             "INSERT INTO connections (id, name, host, port, username, auth_type, group_name,
-                encrypted_password, encrypted_key_path, encrypted_key_passphrase, keychain_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                encrypted_password, encrypted_key_path, encrypted_key_passphrase, keychain_id,
+                proxy_choice, encrypted_proxy_password, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                 name=?, host=?, port=?, username=?, auth_type=?, group_name=?,
-                encrypted_password=?, encrypted_key_path=?, encrypted_key_passphrase=?, keychain_id=?, updated_at=?",
+                encrypted_password=?, encrypted_key_path=?, encrypted_key_passphrase=?, keychain_id=?,
+                proxy_choice=?, encrypted_proxy_password=?, updated_at=?",
         )
         .bind(&conn.id).bind(&conn.name).bind(&conn.host).bind(conn.port)
         .bind(&conn.username).bind(&conn.auth_type).bind(&conn.group)
         .bind(&enc_pw).bind(&enc_kp).bind(&enc_kpp).bind(&conn.keychain_id)
+        .bind(&proxy_choice).bind(&enc_proxy_pw)
         .bind(now).bind(now)
         // ON CONFLICT SET
         .bind(&conn.name).bind(&conn.host).bind(conn.port)
         .bind(&conn.username).bind(&conn.auth_type).bind(&conn.group)
         .bind(&enc_pw).bind(&enc_kp).bind(&enc_kpp).bind(&conn.keychain_id)
+        .bind(&proxy_choice).bind(&enc_proxy_pw)
         .bind(now)
         .execute(&self.pool)
         .await?;

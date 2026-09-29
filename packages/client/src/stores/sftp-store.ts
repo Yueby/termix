@@ -1,4 +1,5 @@
 import { createLogger } from "@/lib/logger";
+import { resolveProxyMode } from "@/lib/proxy";
 import type { ConnectionInfo, ConnectPayload, FileEntry } from "@/lib/tauri";
 import {
     localCreateDir,
@@ -15,6 +16,7 @@ import {
     sftpRemove,
     sftpRename,
 } from "@/lib/tauri";
+import { useSettingsStore } from "@/stores/settings-store";
 import { create } from "zustand";
 
 const logger = createLogger("sftp");
@@ -340,6 +342,7 @@ export const useSftpStore = create<SftpState>()((set, get) => ({
         port: conn.port,
         username: conn.username,
         auth_method: authMethod,
+        proxy: resolveProxyMode(conn.proxy, useSettingsStore.getState().proxy),
       });
 
       addLog("SFTP session established.");

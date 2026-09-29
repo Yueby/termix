@@ -1,8 +1,11 @@
 import { createLogger } from "@/lib/logger";
 import {
     getSettings,
+    getSystemProxy,
     saveSettings as saveSettingsApi,
     type AppSettings,
+    type ProxyConfig,
+    type ProxyMode,
 } from "@/lib/tauri";
 import { getThemeById } from "@/lib/terminal-themes";
 import { create } from "zustand";
@@ -34,6 +37,12 @@ interface SettingsState {
   webdavPassword: string;
   webdavRemoteDir: string;
   syncEncryptionPassword: string;
+  /** Retry an SSH session automatically when it drops unexpectedly. */
+  autoReconnect: boolean;
+  /** Where connections go by default. */
+  proxy: ProxyMode;
+  /** What this machine's OS proxy resolves to; shown beside the "System" option. */
+  systemProxy: ProxyConfig | null;
 
   loaded: boolean;
   loadSettings: () => Promise<void>;
@@ -49,6 +58,9 @@ interface SettingsState {
   setWebdavPassword: (password: string) => void;
   setWebdavRemoteDir: (dir: string) => void;
   setSyncEncryptionPassword: (password: string) => void;
+  setProxy: (proxy: ProxyMode) => void;
+  setAutoReconnect: (enabled: boolean) => void;
+  refreshSystemProxy: () => Promise<void>;
 }
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -70,6 +82,8 @@ function persistToBackend(getState: () => SettingsState) {
       webdavPassword: state.webdavPassword,
       webdavRemoteDir: state.webdavRemoteDir,
       syncEncryptionPassword: state.syncEncryptionPassword,
+      autoReconnect: state.autoReconnect,
+      proxy: state.proxy,
     };
     saveSettingsApi(settings).catch((e) =>
       logger.warn("Failed to persist settings:", e)
@@ -111,6 +125,9 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   webdavPassword: "",
   webdavRemoteDir: "/termix",
   syncEncryptionPassword: "",
+  autoReconnect: true,
+  proxy: { mode: "direct" },
+  systemProxy: null,
   loaded: false,
 
   loadSettings: async () => {
@@ -132,8 +149,11 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
         webdavPassword: s.webdavPassword || "",
         webdavRemoteDir: s.webdavRemoteDir || "/termix",
         syncEncryptionPassword: s.syncEncryptionPassword || "",
+        autoReconnect: s.autoReconnect ?? true,
+        proxy: s.proxy ?? { mode: "direct" },
         loaded: true,
       });
+      void get().refreshSystemProxy();
 
       if (theme === "system") {
         const mql = window.matchMedia("(prefers-color-scheme: dark)");
@@ -218,5 +238,21 @@ export const useSettingsStore = create<SettingsState>()((set, get) => ({
   setSyncEncryptionPassword: (password) => {
     set({ syncEncryptionPassword: password });
     persistToBackend(get);
+  },
+  setProxy: (proxy) => {
+    set({ proxy });
+    persistToBackend(get);
+  },
+  setAutoReconnect: (autoReconnect) => {
+    set({ autoReconnect });
+    persistToBackend(get);
+  },
+  refreshSystemProxy: async () => {
+    try {
+      set({ systemProxy: await getSystemProxy() });
+    } catch (e) {
+      logger.warn("Failed to read the system proxy:", e);
+      set({ systemProxy: null });
+    }
   },
 }));

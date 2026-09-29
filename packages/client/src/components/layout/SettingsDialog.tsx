@@ -14,12 +14,15 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { createLogger } from "@/lib/logger";
+import { defaultCustomProxy, describeProxyMode } from "@/lib/proxy";
 import {
     detectShells,
     syncPull,
     syncPush,
     syncTestConnection,
+    type ProxyKind,
     type ShellProfile,
 } from "@/lib/tauri";
 import { terminalThemes } from "@/lib/terminal-themes";
@@ -29,7 +32,7 @@ import { useKeychainStore } from "@/stores/keychain-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useSnippetStore } from "@/stores/snippet-store";
 import { useUpdateStore } from "@/hooks/use-updater";
-import { ArrowLeft, CheckCircle2, ChevronRight, Cloud, ExternalLink, Info, Loader2, RefreshCw, Settings, Terminal, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronRight, Cloud, ExternalLink, Globe, Info, Loader2, RefreshCw, Settings, Terminal, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 const logger = createLogger("settings");
@@ -42,15 +45,19 @@ interface SettingsDialogProps {
 const NAV_ITEMS = [
   { id: "general", label: "General", icon: Settings },
   { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "proxy", label: "Proxy", icon: Globe },
   { id: "sync", label: "Sync", icon: Cloud },
 ] as const;
 
 type NavId = (typeof NAV_ITEMS)[number]["id"];
 
-function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
+function SettingRow({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-      <Label className="text-sm shrink-0">{label}</Label>
+      <div className="shrink-0">
+        <Label className="text-sm">{label}</Label>
+        {description && <p className="text-xs text-muted-foreground mt-0.5">{description}</p>}
+      </div>
       <div className="w-full sm:w-auto">{children}</div>
     </div>
   );
@@ -60,8 +67,10 @@ function useSettingsLogic(active: boolean) {
   const {
     theme, fontFamily, fontSize, cursorStyle, terminalThemeId, defaultShell,
     webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir, syncEncryptionPassword,
+    proxy, systemProxy, autoReconnect,
     setTheme, setFontFamily, setFontSize, setCursorStyle, setTerminalThemeId, setDefaultShell,
     setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir, setSyncEncryptionPassword,
+    setProxy, refreshSystemProxy, setAutoReconnect,
   } = useSettingsStore();
 
   const [activeNav, setActiveNav] = useState<NavId>("general");
@@ -73,8 +82,15 @@ function useSettingsLogic(active: boolean) {
     if (active) {
       detectShells().then(setShells).catch((e) => logger.warn("detectShells failed:", e));
       setSyncMessage(null);
+      void refreshSystemProxy();
     }
-  }, [active]);
+  }, [active, refreshSystemProxy]);
+
+  useEffect(() => {
+    if (active && activeNav === "proxy") {
+      void refreshSystemProxy();
+    }
+  }, [active, activeNav, refreshSystemProxy]);
 
   const handleTest = async () => {
     setSyncStatus("testing");
@@ -124,6 +140,8 @@ function useSettingsLogic(active: boolean) {
   return {
     theme, fontFamily, fontSize, cursorStyle, terminalThemeId, defaultShell,
     webdavUrl, webdavUsername, webdavPassword, webdavRemoteDir, syncEncryptionPassword,
+    proxy, systemProxy, setProxy, refreshSystemProxy,
+    autoReconnect, setAutoReconnect,
     setTheme, setFontFamily, setFontSize, setCursorStyle, setTerminalThemeId, setDefaultShell,
     setWebdavUrl, setWebdavUsername, setWebdavPassword, setWebdavRemoteDir, setSyncEncryptionPassword,
     activeNav, setActiveNav, shells, syncStatus, syncMessage,
@@ -241,6 +259,141 @@ function SettingsBody({ s }: { s: ReturnType<typeof useSettingsLogic> }) {
               </SelectContent>
             </Select>
           </SettingRow>
+
+          <SettingRow
+            label="Auto Reconnect"
+            description="Automatically retry dropped SSH sessions with a growing delay"
+          >
+            <Switch checked={s.autoReconnect} onCheckedChange={s.setAutoReconnect} />
+          </SettingRow>
+        </div>
+      )}
+
+      {s.activeNav === "proxy" && (
+        <div className="space-y-4">
+          {/* Plain full-width title, like every other settings page: the close button
+              sits top-right, so that corner must stay free of controls. */}
+          <h3 className="text-sm font-medium mb-4">Global Proxy</h3>
+
+          <SettingRow label="Proxy Mode">
+            <Select
+              value={s.proxy.mode}
+              onValueChange={(val) => {
+                if (val === "direct") {
+                  s.setProxy({ mode: "direct" });
+                } else if (val === "system") {
+                  s.setProxy({ mode: "system" });
+                  void s.refreshSystemProxy();
+                } else if (val === "custom") {
+                  s.setProxy(defaultCustomProxy(s.systemProxy));
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-[220px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="direct">Direct</SelectItem>
+                <SelectItem value="system">System proxy</SelectItem>
+                <SelectItem value="custom">Custom</SelectItem>
+              </SelectContent>
+            </Select>
+          </SettingRow>
+
+          {s.proxy.mode === "direct" && (
+            <p className="text-xs text-muted-foreground pt-1">
+              Connections connect directly without a proxy.
+            </p>
+          )}
+
+          {s.proxy.mode === "system" && (
+            <p className="text-xs text-muted-foreground pt-1">
+              {describeProxyMode(s.proxy, s.systemProxy)}
+            </p>
+          )}
+
+          {s.proxy.mode === "custom" && (
+            <div className="space-y-3">
+              <SettingRow label="Protocol">
+                <Select
+                  value={s.proxy.kind}
+                  onValueChange={(v) => {
+                    if (s.proxy.mode === "custom") {
+                      s.setProxy({ ...s.proxy, kind: v as ProxyKind });
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full sm:w-[200px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="socks5">SOCKS5</SelectItem>
+                    <SelectItem value="http">HTTP</SelectItem>
+                  </SelectContent>
+                </Select>
+              </SettingRow>
+
+              <SettingRow label="Host">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  placeholder="127.0.0.1"
+                  value={s.proxy.host}
+                  onChange={(e) => {
+                    if (s.proxy.mode === "custom") {
+                      s.setProxy({ ...s.proxy, host: e.target.value });
+                    }
+                  }}
+                />
+              </SettingRow>
+
+              <SettingRow label="Port">
+                <Input
+                  className="w-full sm:w-[100px]"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  placeholder="7890"
+                  value={s.proxy.port || ""}
+                  onChange={(e) => {
+                    if (s.proxy.mode === "custom") {
+                      const v = parseInt(e.target.value, 10);
+                      s.setProxy({
+                        ...s.proxy,
+                        port: Number.isNaN(v) ? 0 : Math.min(65535, Math.max(0, v)),
+                      });
+                    }
+                  }}
+                />
+              </SettingRow>
+
+              <SettingRow label="Username">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  placeholder="Optional"
+                  value={s.proxy.username || ""}
+                  onChange={(e) => {
+                    if (s.proxy.mode === "custom") {
+                      s.setProxy({ ...s.proxy, username: e.target.value });
+                    }
+                  }}
+                />
+              </SettingRow>
+
+              <SettingRow label="Password">
+                <Input
+                  className="w-full sm:w-[200px]"
+                  type="password"
+                  placeholder="Optional"
+                  value={s.proxy.password || ""}
+                  onChange={(e) => {
+                    if (s.proxy.mode === "custom") {
+                      s.setProxy({ ...s.proxy, password: e.target.value });
+                    }
+                  }}
+                />
+              </SettingRow>
+            </div>
+          )}
         </div>
       )}
 

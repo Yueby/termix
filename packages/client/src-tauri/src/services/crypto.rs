@@ -1,6 +1,6 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm, AeadCore, Key,
+    aead::{Aead, KeyInit},
+    Aes256Gcm, Key,
 };
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
@@ -36,9 +36,8 @@ fn get_or_create_key() -> Result<[u8; 32]> {
         k.copy_from_slice(&bytes);
         k
     } else {
-        use aes_gcm::aead::rand_core::RngCore;
         let mut k = [0u8; 32];
-        OsRng.fill_bytes(&mut k);
+        getrandom::fill(&mut k).map_err(|e| anyhow::anyhow!("system RNG unavailable: {e}"))?;
         let encoded = BASE64.encode(k);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -55,7 +54,16 @@ fn get_or_create_key() -> Result<[u8; 32]> {
 
 fn cipher() -> Result<Aes256Gcm> {
     let key_bytes = get_or_create_key()?;
-    Ok(Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key_bytes)))
+    Ok(Aes256Gcm::new(&Key::<Aes256Gcm>::from(key_bytes)))
+}
+
+/// `aead` 0.6 removed `AeadCore::generate_nonce`, so the nonce bytes are drawn
+/// here. A 12-byte random nonce per message is what this format has always used
+/// (nonce || ciphertext), so existing ciphertexts stay readable.
+fn random_nonce() -> Result<[u8; 12]> {
+    let mut bytes = [0u8; 12];
+    getrandom::fill(&mut bytes).map_err(|e| anyhow::anyhow!("system RNG unavailable: {e}"))?;
+    Ok(bytes)
 }
 
 pub fn encrypt(plaintext: &str) -> Result<String> {
@@ -63,9 +71,9 @@ pub fn encrypt(plaintext: &str) -> Result<String> {
         return Ok(String::new());
     }
     let cipher = cipher()?;
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let nonce = random_nonce()?;
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext.as_bytes())
+        .encrypt(&nonce.into(), plaintext.as_bytes())
         .map_err(|e| anyhow::anyhow!("encryption failed: {}", e))?;
 
     let mut combined = nonce.to_vec();
@@ -86,10 +94,10 @@ pub fn decrypt(encoded: &str) -> Result<String> {
     }
 
     let (nonce_bytes, ciphertext) = combined.split_at(12);
-    let nonce = aes_gcm::Nonce::from_slice(nonce_bytes);
+    let nonce = aes_gcm::Nonce::try_from(nonce_bytes).context("invalid nonce")?;
     let cipher = cipher()?;
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| anyhow::anyhow!("decryption failed: {}", e))?;
 
     String::from_utf8(plaintext).context("invalid UTF-8 after decryption")
@@ -112,10 +120,10 @@ pub fn encrypt_with_password(plaintext: &str, password: &str) -> Result<String> 
         return Ok(String::new());
     }
     let key = derive_key_from_password(password)?;
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
-    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(key));
+    let nonce = random_nonce()?;
     let ciphertext = cipher
-        .encrypt(&nonce, plaintext.as_bytes())
+        .encrypt(&nonce.into(), plaintext.as_bytes())
         .map_err(|e| anyhow::anyhow!("encryption failed: {}", e))?;
 
     let mut combined = nonce.to_vec();
@@ -136,12 +144,49 @@ pub fn decrypt_with_password(encoded: &str, password: &str) -> Result<String> {
     }
 
     let key = derive_key_from_password(password)?;
-    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    let cipher = Aes256Gcm::new(&Key::<Aes256Gcm>::from(key));
     let (nonce_bytes, ciphertext) = combined.split_at(12);
-    let nonce = aes_gcm::Nonce::from_slice(nonce_bytes);
+    let nonce = aes_gcm::Nonce::try_from(nonce_bytes).context("invalid nonce")?;
     let plaintext = cipher
-        .decrypt(nonce, ciphertext)
+        .decrypt(&nonce, ciphertext)
         .map_err(|e| anyhow::anyhow!("decryption failed (wrong sync password?): {}", e))?;
 
     String::from_utf8(plaintext).context("invalid UTF-8 after decryption")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Covers the aes-gcm 0.11 migration: `aead` 0.6 no longer generates the
+    /// nonce for us, so only a round trip proves the bytes still line up.
+    /// The password path is used because it derives its key and therefore never
+    /// touches the on-disk key file.
+    #[test]
+    fn password_round_trip_bypasses_nothing() {
+        let plaintext = "ssh-ed25519 AAAA ciphertext 中文 round trip";
+        let encoded = encrypt_with_password(plaintext, "correct horse").expect("encrypt");
+
+        // Format is unchanged from the pre-0.11 code: nonce || ciphertext || tag.
+        let raw = BASE64.decode(&encoded).expect("base64");
+        assert_eq!(raw.len(), 12 + plaintext.len() + 16);
+
+        let decoded = decrypt_with_password(&encoded, "correct horse").expect("decrypt");
+        assert_eq!(decoded, plaintext);
+        assert!(decrypt_with_password(&encoded, "wrong horse").is_err());
+    }
+
+    /// A nonce must not be reused, and a flipped ciphertext bit must fail the tag.
+    #[test]
+    fn nonces_differ_and_tampering_is_rejected() {
+        let a = encrypt_with_password("same", "pw").expect("encrypt a");
+        let b = encrypt_with_password("same", "pw").expect("encrypt b");
+        assert_ne!(a, b, "two encryptions produced identical output");
+
+        let mut raw = BASE64.decode(&a).expect("base64");
+        let last = raw.len() - 1;
+        raw[last] ^= 0x01;
+        let tampered = BASE64.encode(&raw);
+        assert!(decrypt_with_password(&tampered, "pw").is_err());
+    }
 }

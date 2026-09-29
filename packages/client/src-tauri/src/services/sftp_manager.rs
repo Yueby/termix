@@ -1,10 +1,10 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 use anyhow::{anyhow, Result};
-use async_trait::async_trait;
-use russh::keys::key::PublicKey;
+use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::{client, ChannelId, Disconnect};
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::FileAttributes;
@@ -13,6 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 
 use crate::commands::ssh::AuthMethod;
+use crate::services::proxy::{self, ProxyMode};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
@@ -26,29 +27,29 @@ pub struct FileEntry {
 
 struct SftpHandler;
 
-#[async_trait]
+// See ssh_manager: russh 0.63 handlers are plain `fn`s returning `impl Future`.
 impl client::Handler for SftpHandler {
     type Error = anyhow::Error;
 
-    async fn check_server_key(
+    fn check_server_key(
         &mut self,
-        server_public_key: &PublicKey,
-    ) -> Result<bool, Self::Error> {
+        server_public_key: &PublicKeyOrCertificate,
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         // TODO: Implement known_hosts verification to prevent MITM attacks.
         log::warn!(
             "Host key verification skipped. Fingerprint: {:?}",
-            server_public_key.fingerprint()
+            server_public_key.public_key().fingerprint(HashAlg::Sha256)
         );
-        Ok(true)
+        async { Ok(true) }
     }
 
-    async fn data(
+    fn data(
         &mut self,
         _channel: ChannelId,
         _data: &[u8],
         _session: &mut client::Session,
-    ) -> Result<(), Self::Error> {
-        Ok(())
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        async { Ok(()) }
     }
 }
 
@@ -74,25 +75,29 @@ impl SftpManager {
         port: u16,
         username: &str,
         auth_method: AuthMethod,
+        proxy_mode: &ProxyMode,
     ) -> Result<String> {
         let session_id = uuid::Uuid::new_v4().to_string();
 
         let config = Arc::new(client::Config::default());
         let handler = SftpHandler;
 
-        let mut handle = client::connect(config, (host, port), handler).await?;
+        // Build the tunnel first: russh cannot dial through a proxy itself.
+        let proxy = proxy::resolve(proxy_mode, host);
+        let stream = proxy::connect(proxy.as_ref(), host, port).await?;
+        let mut handle = client::connect_stream(config, stream, handler).await?;
 
         let authenticated = match auth_method {
             AuthMethod::Password { password } => {
-                handle.authenticate_password(username, &password).await?
+                handle.authenticate_password(username, password).await?
             }
             AuthMethod::PrivateKey {
                 key_path,
                 passphrase,
             } => {
-                let key = russh_keys::load_secret_key(&key_path, passphrase.as_deref())?;
+                let key = russh::keys::load_secret_key(&key_path, passphrase.as_deref())?;
                 handle
-                    .authenticate_publickey(username, Arc::new(key))
+                    .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
                     .await?
             }
             AuthMethod::PrivateKeyContent {
@@ -102,14 +107,15 @@ impl SftpManager {
                 if key_content.trim().is_empty() {
                     return Err(anyhow!("Private key content is empty"));
                 }
-                let key = russh_keys::decode_secret_key(&key_content, passphrase.as_deref())?;
+                let key = russh::keys::decode_secret_key(&key_content, passphrase.as_deref())?;
                 handle
-                    .authenticate_publickey(username, Arc::new(key))
+                    .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
                     .await?
             }
         };
 
-        if !authenticated {
+        // 0.63 returns an AuthResult instead of a bool.
+        if !authenticated.success() {
             log::warn!("SFTP authentication failed for {}@{}:{}", username, host, port);
             return Err(anyhow!("Authentication failed"));
         }

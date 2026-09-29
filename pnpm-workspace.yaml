@@ -1,2 +1,29 @@
 packages:
   - "packages/*"
+
+# Dependency lifecycle scripts are denied by pnpm 11 unless the package is listed
+# here, and with `strictDepBuilds` on (the default) an install fails outright when
+# a script is skipped. These are the packages that actually need to build:
+#   esbuild        - fetches its platform binary
+#   better-sqlite3 - native SQLite binding used by packages/server
+#   argon2         - native password hashing used by packages/server
+#   workerd        - wrangler's local workers runtime
+#   msw            - installs its worker script
+allowBuilds:
+  argon2: true
+  better-sqlite3: true
+  esbuild: true
+  msw: true
+  workerd: true
+
+# Minutes a published version must age before pnpm will install it.
+#
+# pnpm 11 defaults to 1440 (24 hours). That default blocks not only `pnpm install`
+# but every `pnpm run`/`pnpm <script>`, because the pre-run dependency check
+# re-verifies the lockfile — so the whole repository becomes unusable, CI included,
+# until each flagged version ages out.
+#
+# 60 minutes keeps the part that matters (a package published moments ago, which is
+# the shape of a compromised release) while letting routine work through. Raise it
+# if you would rather have a wider cooling-off period.
+minimumReleaseAge: 60

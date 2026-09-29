@@ -65,6 +65,7 @@ pub fn run() {
             commands::keychain::generate_ssh_key,
             commands::settings::get_settings,
             commands::settings::save_settings,
+            commands::settings::get_system_proxy,
             commands::snippet::get_snippets,
             commands::snippet::save_snippet,
             commands::snippet::delete_snippet,

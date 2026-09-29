@@ -1,41 +1,41 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-
-interface SessionDataEvent {
-  session_id: string;
-  data: number[];
-}
+import { Channel } from "@tauri-apps/api/core";
 
 type DataCallback = (data: Uint8Array) => void;
 
 interface SessionBridge {
+  channel: Channel<ArrayBuffer>;
   buffer: Uint8Array[];
   consumer: DataCallback | null;
-  unlistenPromise: Promise<UnlistenFn>;
 }
 
 const bridges = new Map<string, SessionBridge>();
 
 /**
- * Begin listening for session data immediately after connection is established.
- * Data arriving before a consumer is attached will be buffered in memory.
+ * Starts capturing a session's output and returns the channel that must be handed
+ * to `ssh_connect` / `local_open`.
+ *
+ * The channel is created before the session exists, so the caller generates the
+ * session id. Output that arrives before a consumer attaches (typically `xterm`
+ * mounting) is buffered in memory.
+ *
+ * Chunks arrive as raw `ArrayBuffer`s: the Rust side sends
+ * `InvokeResponseBody::Raw`, so nothing is JSON- or base64-encoded on the way.
  */
-export function startBuffering(sessionId: string, eventName: string) {
-  if (bridges.has(sessionId)) return;
+export function startBuffering(sessionId: string): Channel<ArrayBuffer> {
+  const existing = bridges.get(sessionId);
+  if (existing) return existing.channel;
 
-  const bridge: SessionBridge = {
-    buffer: [],
-    consumer: null,
-    unlistenPromise: listen<SessionDataEvent>(eventName, (event) => {
-      if (event.payload.session_id !== sessionId) return;
-      const data = new Uint8Array(event.payload.data);
-      if (bridge.consumer) {
-        bridge.consumer(data);
-      } else {
-        bridge.buffer.push(data);
-      }
-    }),
+  const channel = new Channel<ArrayBuffer>();
+  const bridge: SessionBridge = { channel, buffer: [], consumer: null };
+
+  channel.onmessage = (chunk) => {
+    const data = new Uint8Array(chunk);
+    if (bridge.consumer) bridge.consumer(data);
+    else bridge.buffer.push(data);
   };
+
   bridges.set(sessionId, bridge);
+  return channel;
 }
 
 /**
@@ -60,11 +60,12 @@ export function detachConsumer(sessionId: string) {
   }
 }
 
-export async function stopBuffering(sessionId: string) {
+export function stopBuffering(sessionId: string) {
   const bridge = bridges.get(sessionId);
-  if (bridge) {
-    const unlisten = await bridge.unlistenPromise;
-    unlisten();
-    bridges.delete(sessionId);
-  }
+  if (!bridge) return;
+  // `cleanupCallback` exists at runtime but is marked private in the typings.
+  (bridge.channel as unknown as { cleanupCallback?: () => void }).cleanupCallback?.();
+  bridge.consumer = null;
+  bridge.buffer.length = 0;
+  bridges.delete(sessionId);
 }
