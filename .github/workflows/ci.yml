@@ -70,6 +70,12 @@ jobs:
       # tell you that a handler ran with an empty context.
       - run: pnpm --filter @termix/server test
 
+      # The Worker is a second build target, and the Node build says nothing about it: a
+      # native dependency reachable from the Worker's import graph fails here and nowhere
+      # else. This is what caught argon2 being reachable from the shared crypto module,
+      # which had made `wrangler deploy` fail outright with `Could not resolve "os"`.
+      - run: pnpm --filter @termix/server exec wrangler deploy --dry-run --outdir /tmp/termix-worker
+
   rust:
     name: Rust (check + test)
     runs-on: ubuntu-latest

@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app";
 import { createSqliteDatabase } from "./db/sqlite";
-import { createArgon2Hasher } from "./utils/crypto";
+import { createArgon2Hasher } from "./utils/crypto-node";
 
 const DB_PATH = process.env.DB_PATH || "./data/termix.db";
 const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET || "";

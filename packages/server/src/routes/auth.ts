@@ -6,11 +6,7 @@ import { schema } from "../db";
 import { requireAuth, REFRESH_AUDIENCE, signAccessToken, signRefreshToken, verifyToken } from "../middleware/auth";
 import { verifyTurnstile } from "../middleware/turnstile";
 import type { AppEnv } from "../types";
-import {
-  verifyWithAlgorithm,
-  type HashAlgorithm,
-  type PasswordHasher,
-} from "../utils/crypto";
+import type { HashAlgorithm, PasswordHasher } from "../utils/crypto";
 import { generateId } from "../utils/id";
 
 const REFRESH_TOKEN_DAYS = 30;
@@ -102,7 +98,20 @@ export const authRoutes = new Hono<AppEnv>()
     // does. The hash must come from the active hasher — see dummyHashFor.
     const hashToVerify = user?.passwordHash ?? (await dummyHashFor(hasher));
     const algo = (user?.hashAlgorithm ?? hasher.algorithm) as HashAlgorithm;
-    const valid = await verifyWithAlgorithm(password, hashToVerify, algo);
+
+    // A stored record this deployment cannot check is a different failure from a wrong
+    // password. Saying so is the only way an operator discovers why an account stopped
+    // being able to sign in after a move between deployments.
+    let valid: boolean;
+    try {
+      valid = await hasher.verifyAs(password, hashToVerify, algo);
+    } catch (error) {
+      console.warn(`Cannot verify the stored password for ${username}: ${error}`);
+      return c.json(
+        { error: "This account's password cannot be verified on this deployment" },
+        409,
+      );
+    }
     if (!user || !valid) {
       return c.json({ error: "Invalid credentials" }, 401);
     }

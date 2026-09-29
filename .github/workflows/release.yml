@@ -13,6 +13,9 @@ on:
 
 permissions:
   contents: write
+  # Reading the check runs for the release commit, so a release cannot be built from a
+  # revision CI never saw.
+  checks: read
   # Resolving each commit to the pull request it came from needs this; without it
   # git-cliff's lookups are refused and the entries come out with no PR link.
   pull-requests: read
@@ -65,6 +68,31 @@ jobs:
           check "Cargo.toml"          "$(grep -m1 '^version = ' packages/client/src-tauri/Cargo.toml | cut -d'\"' -f2)"
 
           exit "$fail"
+
+      - name: Require the checks to have passed for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          runs=$(gh api "repos/$REPO/commits/$sha/check-runs" --paginate --jq '.check_runs')
+          total=$(echo "$runs" | jq 'length')
+
+          # Nothing here guarantees that the revision being signed and published is one CI
+          # has looked at: the workflow runs on a tag, which can point anywhere.
+          if [ "$total" -eq 0 ]; then
+            echo "::error::No checks ran for $sha. Release a revision CI has seen — merge to main and let it pass first."
+            exit 1
+          fi
+
+          bad=$(echo "$runs" | jq -r '[.[] | select(.conclusion != "success" and .conclusion != "skipped" and .conclusion != "neutral")]')
+          if [ "$(echo "$bad" | jq 'length')" -ne 0 ]; then
+            echo "$bad" | jq -r '.[] | "::error::\(.name): \(.conclusion)"'
+            exit 1
+          fi
+
+          echo "All $total checks passed for $sha."
 
   build:
     name: ${{ matrix.label }}
