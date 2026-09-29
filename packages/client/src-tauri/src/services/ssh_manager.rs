@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use parking_lot::Mutex as SyncMutex;
 use russh::client::DisconnectReason;
 use russh::keys::{PrivateKeyWithHashAlg, PublicKeyOrCertificate};
-use russh::{client, Channel, ChannelId, Disconnect};
+use russh::{client, ChannelId, ChannelWriteHalf, Disconnect};
 use serde::Serialize;
 use tauri::ipc::{Channel as IpcChannel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter};
@@ -99,7 +99,7 @@ impl client::Handler for ClientHandler {
 
 struct Session {
     handle: client::Handle<ClientHandler>,
-    channel: Arc<Channel<client::Msg>>,
+    writer: Arc<ChannelWriteHalf<client::Msg>>,
 }
 
 pub struct SshManager {
@@ -200,14 +200,26 @@ impl SshManager {
             .await?;
         channel.request_shell(false).await?;
 
+        let (mut reader, writer) = channel.split();
+
         let session = Session {
             handle,
-            channel: Arc::new(channel),
+            writer: Arc::new(writer),
         };
         self.sessions
             .lock()
             .await
             .insert(session_id.clone(), session);
+
+        // The read half has to be consumed, and not for the data: russh pushes every
+        // incoming message into a bounded per-channel queue (`channel_buffer_size`, 100
+        // by default) *before* handing it to `Handler::data`, so a channel nobody reads
+        // stalls the entire transport once that queue fills — about 100 output messages
+        // into an interactive session, after which the connection simply stops. The
+        // output itself is forwarded by the handler, so what arrives here is discarded;
+        // what matters is that something is always waiting on it. `wait` returns `None`
+        // once the channel closes, which ends the task.
+        tokio::spawn(async move { while reader.wait().await.is_some() {} });
 
         // Spawn a task to forward SSH output to the frontend over the channel
         let sid = session_id.clone();
@@ -265,7 +277,7 @@ impl SshManager {
             let sessions = self.sessions.lock().await;
             sessions
                 .get(session_id)
-                .map(|s| s.channel.clone())
+                .map(|s| s.writer.clone())
                 .ok_or_else(|| anyhow!("Session not found: {}", session_id))?
         };
         channel
@@ -280,7 +292,7 @@ impl SshManager {
             let sessions = self.sessions.lock().await;
             sessions
                 .get(session_id)
-                .map(|s| s.channel.clone())
+                .map(|s| s.writer.clone())
                 .ok_or_else(|| anyhow!("Session not found: {}", session_id))?
         };
         channel

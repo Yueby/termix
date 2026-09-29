@@ -43,17 +43,16 @@ pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
     if settings.webdav_url.is_empty() {
         return Err("WebDAV URL not configured".into());
     }
-    let webdav_pw = crypto::decrypt(&settings.webdav_password).unwrap_or_else(|e| {
-        log::warn!("sync_push: failed to decrypt webdav_password: {}", e);
-        String::new()
-    });
-    let sync_pw = crypto::decrypt(&settings.sync_encryption_password).unwrap_or_else(|e| {
-        log::warn!(
-            "sync_push: failed to decrypt sync_encryption_password: {}",
-            e
-        );
-        String::new()
-    });
+    // Fails closed. Degrading an unreadable stored password to "no password" meant an
+    // app that could not read its own configuration would upload everything else in
+    // plaintext instead of refusing — the one case where refusing is the whole point.
+    let webdav_pw = crypto::decrypt_secret(&settings.webdav_password, "the WebDAV password")
+        .map_err(|e| e.to_string())?;
+    let sync_pw = crypto::decrypt_secret(
+        &settings.sync_encryption_password,
+        "the sync encryption password",
+    )
+    .map_err(|e| e.to_string())?;
 
     let client = WebDavClient::new(&settings.webdav_url, &settings.webdav_username, &webdav_pw);
 
@@ -66,6 +65,12 @@ pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
         conn.password = sync_encrypt(&conn.password, &sync_pw)?;
         conn.key_path = sync_encrypt(&conn.key_path, &sync_pw)?;
         conn.key_passphrase = sync_encrypt(&conn.key_passphrase, &sync_pw)?;
+        // `get_connections` has already decrypted this one, so without encrypting it here
+        // an authenticated custom proxy password was written into connections.json in
+        // the clear even with a sync password configured.
+        if let Some(crate::services::proxy::ProxyMode::Custom(config)) = conn.proxy.as_mut() {
+            config.password = sync_encrypt(&config.password, &sync_pw)?;
+        }
     }
     let conn_json = serde_json::to_string_pretty(&connections).map_err(|e| e.to_string())?;
     client
@@ -134,17 +139,13 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
     if settings.webdav_url.is_empty() {
         return Err("WebDAV URL not configured".into());
     }
-    let webdav_pw = crypto::decrypt(&settings.webdav_password).unwrap_or_else(|e| {
-        log::warn!("sync_pull: failed to decrypt webdav_password: {}", e);
-        String::new()
-    });
-    let sync_pw = crypto::decrypt(&settings.sync_encryption_password).unwrap_or_else(|e| {
-        log::warn!(
-            "sync_pull: failed to decrypt sync_encryption_password: {}",
-            e
-        );
-        String::new()
-    });
+    let webdav_pw = crypto::decrypt_secret(&settings.webdav_password, "the WebDAV password")
+        .map_err(|e| e.to_string())?;
+    let sync_pw = crypto::decrypt_secret(
+        &settings.sync_encryption_password,
+        "the sync encryption password",
+    )
+    .map_err(|e| e.to_string())?;
 
     let client = WebDavClient::new(&settings.webdav_url, &settings.webdav_username, &webdav_pw);
 
@@ -163,6 +164,11 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
                     conn.password = sync_decrypt(&conn.password, &sync_pw)?;
                     conn.key_path = sync_decrypt(&conn.key_path, &sync_pw)?;
                     conn.key_passphrase = sync_decrypt(&conn.key_passphrase, &sync_pw)?;
+                    if let Some(crate::services::proxy::ProxyMode::Custom(config)) =
+                        conn.proxy.as_mut()
+                    {
+                        config.password = sync_decrypt(&config.password, &sync_pw)?;
+                    }
                 }
                 let count = remote_conns.len();
                 for conn in remote_conns {
@@ -248,13 +254,8 @@ pub async fn sync_test_connection(db: State<'_, Database>) -> Result<String, Str
     if settings.webdav_url.is_empty() {
         return Err("WebDAV URL not configured".into());
     }
-    let webdav_pw = crypto::decrypt(&settings.webdav_password).unwrap_or_else(|e| {
-        log::warn!(
-            "sync_test_connection: failed to decrypt webdav_password: {}",
-            e
-        );
-        String::new()
-    });
+    let webdav_pw = crypto::decrypt_secret(&settings.webdav_password, "the WebDAV password")
+        .map_err(|e| e.to_string())?;
 
     let client = WebDavClient::new(&settings.webdav_url, &settings.webdav_username, &webdav_pw);
 

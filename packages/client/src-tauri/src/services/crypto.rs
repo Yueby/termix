@@ -11,6 +11,26 @@ const KEY_FILE_NAME: &str = ".termix_key";
 
 static CACHED_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
 
+/// Decrypts a stored secret, or explains why it could not be decrypted.
+///
+/// The pattern this replaces — `decrypt(..).unwrap_or_else(|_| String::new())` — turned a
+/// missing or mismatched key file into blank credentials, and the next save wrote those
+/// blanks back over the ciphertext, so a recoverable problem became permanent loss. A
+/// failure now stops the read and leaves the stored value untouched.
+///
+/// An empty stored value still reads back as empty: that is a credential the user
+/// deliberately cleared, which is a different thing from one that cannot be read.
+pub fn decrypt_secret(encoded: &str, what: &str) -> Result<String> {
+    if encoded.is_empty() {
+        return Ok(String::new());
+    }
+    decrypt(encoded).map_err(|e| {
+        anyhow::anyhow!(
+            "Could not decrypt {what}: {e}. The encryption key file is missing, or it does not belong to this database. The stored value has been left as it is."
+        )
+    })
+}
+
 fn key_file_path() -> Result<PathBuf> {
     let app_dir = dirs::data_dir()
         .or_else(dirs::home_dir)

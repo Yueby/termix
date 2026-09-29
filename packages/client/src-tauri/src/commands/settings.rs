@@ -58,10 +58,14 @@ impl Default for AppSettings {
 #[tauri::command]
 pub async fn get_settings(db: State<'_, Database>) -> Result<AppSettings, String> {
     let mut s = db.get_settings().await.map_err(|e| e.to_string())?;
-    s.webdav_password = crypto::decrypt(&s.webdav_password).unwrap_or_default();
-    s.sync_encryption_password = crypto::decrypt(&s.sync_encryption_password).unwrap_or_default();
+    s.webdav_password = crypto::decrypt_secret(&s.webdav_password, "the WebDAV password")
+        .map_err(|e| e.to_string())?;
+    s.sync_encryption_password =
+        crypto::decrypt_secret(&s.sync_encryption_password, "the sync encryption password")
+            .map_err(|e| e.to_string())?;
     if let ProxyMode::Custom(config) = &mut s.proxy {
-        config.password = crypto::decrypt(&config.password).unwrap_or_default();
+        config.password = crypto::decrypt_secret(&config.password, "the global proxy password")
+            .map_err(|e| e.to_string())?;
     }
     Ok(s)
 }

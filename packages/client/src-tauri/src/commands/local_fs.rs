@@ -131,35 +131,52 @@ pub async fn local_create_dir(path: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn local_remove(path: String, is_dir: bool) -> Result<(), String> {
     log::info!("local_remove: path={}, is_dir={}", path, is_dir);
-    let canonical = safe_canonical(&path)?;
-    if is_dir {
-        tokio::fs::remove_dir_all(&canonical).await.map_err(|e| {
-            log::warn!("local_remove failed: {}: {}", path, e);
-            format!("Failed to remove directory {}: {}", path, e)
-        })
+    // Deliberately not canonicalised. Canonicalising resolves a symlink, so removing
+    // "link" removed the file it pointed at and left the link dangling; a directory link
+    // reached recursive deletion of the target. `symlink_metadata` describes the entry
+    // itself, which is what has to be removed, and the filesystem decides the type — the
+    // caller's `is_dir` is only logged.
+    let meta = tokio::fs::symlink_metadata(&path)
+        .await
+        .map_err(|e| format!("Invalid path '{}': {}", path, e))?;
+
+    let result = if meta.file_type().is_symlink() {
+        // Remove the link and only the link. On Windows a directory symlink has to go
+        // through remove_dir; on Unix a link is always remove_file-able.
+        if meta.is_dir() {
+            tokio::fs::remove_dir(&path).await
+        } else {
+            tokio::fs::remove_file(&path).await
+        }
+    } else if meta.is_dir() {
+        tokio::fs::remove_dir_all(&path).await
     } else {
-        tokio::fs::remove_file(&canonical).await.map_err(|e| {
-            log::warn!("local_remove failed: {}: {}", path, e);
-            format!("Failed to remove file {}: {}", path, e)
-        })
-    }
+        tokio::fs::remove_file(&path).await
+    };
+
+    result.map_err(|e| {
+        log::warn!("local_remove failed: {}: {}", path, e);
+        format!("Failed to remove {}: {}", path, e)
+    })
 }
 
 #[tauri::command]
 pub async fn local_rename(old_path: String, new_path: String) -> Result<(), String> {
     log::info!("local_rename: {} -> {}", old_path, new_path);
-    let canonical_old = safe_canonical(&old_path)?;
+    // Not canonicalised, for the same reason as local_remove: renaming a symlink has to
+    // move the link rather than the thing it points at.
+    let _ = tokio::fs::symlink_metadata(&old_path)
+        .await
+        .map_err(|e| format!("Invalid path '{}': {}", old_path, e))?;
     if let Some(new_parent) = std::path::Path::new(&new_path).parent() {
         if new_parent.exists() {
             let _ = safe_canonical(&new_parent.to_string_lossy())?;
         }
     }
-    tokio::fs::rename(&canonical_old, &new_path)
-        .await
-        .map_err(|e| {
-            log::warn!("local_rename failed: {} -> {}: {}", old_path, new_path, e);
-            format!("Failed to rename {} to {}: {}", old_path, new_path, e)
-        })
+    tokio::fs::rename(&old_path, &new_path).await.map_err(|e| {
+        log::warn!("local_rename failed: {} -> {}: {}", old_path, new_path, e);
+        format!("Failed to rename {} to {}: {}", old_path, new_path, e)
+    })
 }
 
 #[tauri::command]

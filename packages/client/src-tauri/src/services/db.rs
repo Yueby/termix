@@ -320,22 +320,14 @@ impl Database {
             enc_proxy_pw,
         ) in rows
         {
-            let password = crypto::decrypt(&enc_pw).unwrap_or_else(|e| {
-                log::warn!("Failed to decrypt password for connection {}: {}", id, e);
-                String::new()
-            });
-            let key_path = crypto::decrypt(&enc_kp).unwrap_or_else(|e| {
-                log::warn!("Failed to decrypt key_path for connection {}: {}", id, e);
-                String::new()
-            });
-            let key_passphrase = crypto::decrypt(&enc_kpp).unwrap_or_else(|e| {
-                log::warn!(
-                    "Failed to decrypt key_passphrase for connection {}: {}",
-                    id,
-                    e
-                );
-                String::new()
-            });
+            let password =
+                crypto::decrypt_secret(&enc_pw, &format!("the password for connection {id}"))?;
+            let key_path =
+                crypto::decrypt_secret(&enc_kp, &format!("the key path for connection {id}"))?;
+            let key_passphrase = crypto::decrypt_secret(
+                &enc_kpp,
+                &format!("the key passphrase for connection {id}"),
+            )?;
             // The proxy password is stored apart from the mode so it can be encrypted.
             let mut proxy: Option<ProxyMode> = if proxy_choice.trim().is_empty() {
                 None
@@ -343,14 +335,10 @@ impl Database {
                 serde_json::from_str(&proxy_choice).ok()
             };
             if let Some(ProxyMode::Custom(config)) = proxy.as_mut() {
-                config.password = crypto::decrypt(&enc_proxy_pw).unwrap_or_else(|e| {
-                    log::warn!(
-                        "Failed to decrypt proxy password for connection {}: {}",
-                        id,
-                        e
-                    );
-                    String::new()
-                });
+                config.password = crypto::decrypt_secret(
+                    &enc_proxy_pw,
+                    &format!("the proxy password for connection {id}"),
+                )?;
             }
             conns.push(ConnectionInfo {
                 id,
@@ -439,20 +427,17 @@ impl Database {
 
         let mut items = Vec::with_capacity(rows.len());
         for (id, name, key_type, enc_pk, enc_pub, enc_cert, enc_pp) in rows {
-            let decrypt = |field: &str, enc: &str| -> String {
-                crypto::decrypt(enc).unwrap_or_else(|e| {
-                    log::warn!("Failed to decrypt {} for keychain {}: {}", field, id, e);
-                    String::new()
-                })
+            let decrypt = |field: &str, enc: &str| -> Result<String> {
+                crypto::decrypt_secret(enc, &format!("the {field} of keychain item {id}"))
             };
             items.push(KeychainItem {
                 id: id.clone(),
                 name,
                 key_type,
-                private_key: decrypt("private_key", &enc_pk),
-                public_key: decrypt("public_key", &enc_pub),
-                certificate: decrypt("certificate", &enc_cert),
-                passphrase: decrypt("passphrase", &enc_pp),
+                private_key: decrypt("private key", &enc_pk)?,
+                public_key: decrypt("public key", &enc_pub)?,
+                certificate: decrypt("certificate", &enc_cert)?,
+                passphrase: decrypt("passphrase", &enc_pp)?,
             });
         }
         Ok(items)
