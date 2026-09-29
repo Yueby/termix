@@ -1,0 +1,55 @@
+name: Regenerate release notes
+
+# A release's notes are generated from the commit history by git-cliff when the tag is
+# pushed. This entry point regenerates them for the most recent tag without rebuilding
+# anything, which is what you want after a fix to .github/cliff.toml — otherwise the
+# only way to refresh them would be re-running the whole release.
+#
+# It reads .github/cliff.toml from the default branch, not from the tag, so a config
+# fix applies to a tag that was cut before it.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    name: Regenerate notes for the latest tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history and all tags: git-cliff needs them to find the tag's range.
+          fetch-depth: 0
+
+      - name: Resolve the latest tag
+        id: tag
+        run: echo "name=$(git describe --tags --abbrev=0)" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the notes
+        id: notes
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: .github/cliff.toml
+          # `--latest` covers the most recent tag only, so commits made after it are
+          # left out; they belong to the next release.
+          args: --latest --strip header
+
+      - name: Update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.name }}
+          NOTES: ${{ steps.notes.outputs.content }}
+        run: |
+          # `gh release edit` publishes a release unless --draft is passed, so mirror
+          # whatever state the release is already in rather than deciding here.
+          if [ "$(gh release view "$TAG" --json isDraft -q .isDraft)" = "true" ]; then
+            DRAFT=--draft
+          else
+            DRAFT=--draft=false
+          fi
+
+          printf '%s\n' "$NOTES" > notes.md
+          gh release edit "$TAG" $DRAFT --notes-file notes.md
+          echo "Updated the release notes for $TAG."
