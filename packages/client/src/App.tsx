@@ -39,6 +39,7 @@ import { isSnippetEmpty, useSnippetStore } from "@/stores/snippet-store";
 import { useUiStore } from "@/stores/ui-store";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useUpdateStore } from "@/hooks/use-updater";
+import { ReleaseNotes } from "@/components/updater/ReleaseNotes";
 import { focusTerminal, pasteToTerminal } from "@/lib/terminal-registry";
 import { localWrite, sshWrite } from "@/lib/tauri";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -396,15 +397,23 @@ function App() {
         </AlertDialog>
 
         <AlertDialog open={updateStatus === "available"} onOpenChange={(open) => { if (!open) dismissUpdate(); }}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Update Available</AlertDialogTitle>
-              <AlertDialogDescription>
-                A new version <span className="font-semibold text-foreground">v{update?.version}</span> is available.
-                {update?.body && <span className="block mt-1 text-xs">{update.body}</span>}
+          <AlertDialogContent className="sm:max-w-xl max-h-[min(540px,calc(100dvh-2rem))] flex flex-col gap-3 overflow-hidden p-5">
+            <AlertDialogHeader className="shrink-0 text-left">
+              <AlertDialogTitle className="text-base font-semibold">Update Available</AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="text-xs text-muted-foreground">
+                  A new version <span className="font-semibold text-foreground">v{update?.version}</span> is available.
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter>
+
+            {update?.body && update.body.trim() ? (
+              <div className="flex-1 min-h-0 overflow-y-auto rounded-md border border-border/60 bg-muted/20 p-3 text-xs">
+                <ReleaseNotes notes={update.body} />
+              </div>
+            ) : null}
+
+            <AlertDialogFooter className="shrink-0 pt-1">
               <AlertDialogCancel>Later</AlertDialogCancel>
               <AlertDialogAction onClick={downloadAndInstall}>
                 <Download className="mr-1.5 h-3.5 w-3.5" />
