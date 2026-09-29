@@ -200,6 +200,36 @@ mod tests {
 
     /// A nonce must not be reused, and a flipped ciphertext bit must fail the tag.
     #[test]
+    fn decrypt_secret_distinguishes_empty_from_unreadable() {
+        // A credential the user deliberately cleared reads back as empty. That is not the
+        // same thing as one that cannot be read, and conflating the two is what used to
+        // let a failed read overwrite the stored ciphertext with nothing.
+        assert_eq!(decrypt_secret("", "a secret").expect("empty is fine"), "");
+
+        let error = decrypt_secret("not-valid-base64", "the password for a host")
+            .expect_err("undecodable input must fail");
+        let message = error.to_string();
+        assert!(
+            message.contains("the password for a host"),
+            "the message has to say which secret failed, got: {message}"
+        );
+        assert!(
+            message.contains("left as it is"),
+            "the message has to say the stored value was not touched, got: {message}"
+        );
+    }
+
+    #[test]
+    fn decrypt_secret_passes_a_readable_value_through() {
+        let plaintext = "hunter2-but-longer";
+        let encoded = encrypt(plaintext).expect("encrypt");
+        assert_eq!(
+            decrypt_secret(&encoded, "a secret").expect("decrypt"),
+            plaintext
+        );
+    }
+
+    #[test]
     fn nonces_differ_and_tampering_is_rejected() {
         let a = encrypt_with_password("same", "pw").expect("encrypt a");
         let b = encrypt_with_password("same", "pw").expect("encrypt b");
