@@ -151,23 +151,6 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
     }
   }, [renamingTabId]);
 
-  const lastClickRef = useRef(0);
-
-  const handleTitleBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement;
-    if (target.closest("button, a, input, [role='button'], [role='menuitem'], [role='option'], [data-radix-collection-item]")) return;
-    if (e.button !== 0) return;
-
-    e.preventDefault();
-    const now = Date.now();
-    if (now - lastClickRef.current < 300) {
-      lastClickRef.current = 0;
-      getAppWindow().toggleMaximize().catch((e) => logger.warn("toggleMaximize failed:", e));
-    } else {
-      lastClickRef.current = now;
-      getAppWindow().startDragging();
-    }
-  };
 
   const { navPage: currentNavPage, activeView: currentActiveView, mobileShowSessions } = useUiStore();
 
@@ -204,6 +187,7 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
 
   return (
     <div
+      data-tauri-drag-region
       className={cn(
         "flex h-12 shrink-0 items-center select-none",
         !inTerminal && "border-b bg-background"
@@ -218,10 +202,9 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
         '--tf-bg-dim': terminalFg ? `color-mix(in srgb, ${terminalFg} 6%, transparent)` : undefined,
         '--tf-sep': terminalFg ? `color-mix(in srgb, ${terminalFg} 20%, transparent)` : undefined,
       } as React.CSSProperties : undefined}
-      onMouseDown={handleTitleBarMouseDown}
     >
       {/* Left: hamburger dropdown menu */}
-      <div className="flex items-center shrink-0">
+      <div data-tauri-drag-region className="flex items-center shrink-0">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -249,7 +232,10 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
       </div>
 
       {/* Tabs area */}
-      <div className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto px-1 py-1">
+      <div
+        data-tauri-drag-region
+        className="flex items-center gap-1.5 flex-1 min-w-0 overflow-x-auto px-1 py-1"
+      >
         {/* Hosts tab */}
         <button
           className={cn(
@@ -276,10 +262,13 @@ export function TitleBar({ onCloseTab, onCloseOtherTabs, onCloseAllTabs, termina
 
         {/* Separator */}
         {tabs.length > 0 && (
-          <div className={cn(
-            "h-4 w-px shrink-0",
-            styles.separator
-          )} />
+          <div
+            data-tauri-drag-region
+            className={cn(
+              "h-4 w-px shrink-0",
+              styles.separator
+            )}
+          />
         )}
 
         {/* SSH session tabs */}
