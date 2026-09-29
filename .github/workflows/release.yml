@@ -13,6 +13,9 @@ on:
 
 permissions:
   contents: write
+  # Resolving each commit to the pull request it came from needs this; without it
+  # git-cliff's lookups are refused and the entries come out with no PR link.
+  pull-requests: read
 
 concurrency:
   group: release-${{ github.ref }}

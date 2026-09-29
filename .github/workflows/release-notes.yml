@@ -15,6 +15,8 @@ on:
 
 permissions:
   contents: write
+  # See the note in release.yml: the commit-to-pull-request lookups need this.
+  pull-requests: read
 
 jobs:
   regenerate:
