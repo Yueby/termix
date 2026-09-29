@@ -44,8 +44,11 @@ impl client::Handler for ClientHandler {
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         // TODO: Implement known_hosts verification to prevent MITM attacks.
         // Currently accepts all host keys — acceptable for early development only.
+        // `{}` (Display) prints the OpenSSH form, `SHA256:base64`, which is what
+        // `ssh-keyscan` and `ssh -v` show and therefore the only form a user can
+        // actually compare against.
         log::warn!(
-            "Host key verification skipped. Fingerprint: {:?}",
+            "Host key verification skipped. Fingerprint: {}",
             server_public_key.public_key().fingerprint(HashAlg::Sha256)
         );
         async { Ok(true) }
@@ -282,7 +285,6 @@ impl SshManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, Ordering};
 
     /// The 0.63 migration rewrote the handler signatures and moved the host key
     /// type to `PublicKeyOrCertificate`. Getting as far as key exchange proves
@@ -291,7 +293,9 @@ mod tests {
     #[tokio::test]
     #[ignore = "needs network access to github.com:22"]
     async fn reaches_host_key_verification() {
-        struct Probe(Arc<AtomicBool>);
+        struct Probe {
+            fingerprint: Arc<SyncMutex<Option<String>>>,
+        }
 
         impl client::Handler for Probe {
             type Error = anyhow::Error;
@@ -300,26 +304,42 @@ mod tests {
                 &mut self,
                 server_public_key: &PublicKeyOrCertificate,
             ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
-                let fingerprint = server_public_key.public_key().fingerprint(HashAlg::Sha256);
-                log::info!("Probe saw host key {fingerprint}");
-                self.0.store(true, Ordering::SeqCst);
+                let rendered = server_public_key
+                    .public_key()
+                    .fingerprint(HashAlg::Sha256)
+                    .to_string();
+                *self.fingerprint.lock() = Some(rendered);
                 async { Ok(true) }
             }
         }
 
-        let seen = Arc::new(AtomicBool::new(false));
+        let fingerprint: Arc<SyncMutex<Option<String>>> = Arc::new(SyncMutex::new(None));
         let config = Arc::new(client::Config::default());
         let handle = tokio::time::timeout(
             Duration::from_secs(30),
-            client::connect(config, ("github.com", 22), Probe(seen.clone())),
+            client::connect(
+                config,
+                ("github.com", 22),
+                Probe {
+                    fingerprint: fingerprint.clone(),
+                },
+            ),
         )
         .await
         .expect("key exchange timed out")
         .expect("key exchange failed");
 
+        let rendered = fingerprint
+            .lock()
+            .clone()
+            .expect("check_server_key was never called");
+
+        // The log line has to stay in the form a user can compare against
+        // `ssh-keyscan` / `ssh -v`. Rendering the value with `{:?}` produces a byte
+        // array instead, which is why this is pinned rather than left to review.
         assert!(
-            seen.load(Ordering::SeqCst),
-            "check_server_key was never called"
+            rendered.starts_with("SHA256:"),
+            "expected the OpenSSH fingerprint form, got {rendered}"
         );
         drop(handle);
     }

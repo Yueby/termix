@@ -36,8 +36,9 @@ impl client::Handler for SftpHandler {
         server_public_key: &PublicKeyOrCertificate,
     ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         // TODO: Implement known_hosts verification to prevent MITM attacks.
+        // Display, not Debug — see the note in ssh_manager.rs.
         log::warn!(
-            "Host key verification skipped. Fingerprint: {:?}",
+            "Host key verification skipped. Fingerprint: {}",
             server_public_key.public_key().fingerprint(HashAlg::Sha256)
         );
         async { Ok(true) }
