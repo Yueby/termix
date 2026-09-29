@@ -45,7 +45,8 @@ import { localWrite, sshWrite } from "@/lib/tauri";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/toaster";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Download, Loader2 } from "lucide-react";
+import { AlertCircle, ChevronRight, Download, Loader2, RefreshCw } from "lucide-react";
+import { formatDownloadProgress, getUpdateErrorDetails } from "@/components/updater/updater-utils";
 import { pullAtStartup, startAutoSync } from "@/lib/auto-sync";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -77,7 +78,22 @@ function App() {
   const [showHostDiscard, setShowHostDiscard] = useState(false);
   const pendingEditHostRef = useRef<string | null>(null);
 
-  const { status: updateStatus, update, progress: updateProgress, downloadAndInstall, dismiss: dismissUpdate } = useUpdateStore();
+  const {
+    status: updateStatus,
+    update,
+    progress: updateProgress,
+    error: updateError,
+    errorKind: updateErrorKind,
+    downloadAndInstall,
+    checkForUpdate,
+    dismiss: dismissUpdate,
+  } = useUpdateStore();
+
+  const progressInfo = formatDownloadProgress(
+    updateProgress?.downloaded ?? 0,
+    updateProgress?.total ?? 0
+  );
+  const errorDetails = getUpdateErrorDetails(updateErrorKind);
 
   useEffect(() => {
     startAutoSync();
@@ -89,7 +105,7 @@ function App() {
     ])
       .finally(() => {
         getCurrentWindow().show();
-        setTimeout(() => useUpdateStore.getState().checkForUpdate(), 3000);
+        setTimeout(() => useUpdateStore.getState().checkForUpdate({ explicit: false }), 3000);
       })
       // After the settings this just loaded, and after the window is up: an unreachable
       // remote must not be able to hold the app closed.
@@ -424,25 +440,54 @@ function App() {
         </AlertDialog>
 
         <AlertDialog open={updateStatus === "downloading" || updateStatus === "installing"}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {updateStatus === "installing" ? "Installing Update..." : "Downloading Update..."}
+          <AlertDialogContent className="sm:max-w-md p-6">
+            <AlertDialogHeader className="text-left space-y-3">
+              <AlertDialogTitle className="text-base font-semibold">
+                {updateStatus === "installing"
+                  ? "Installing Update..."
+                  : update?.version
+                  ? `Downloading Update v${update.version}`
+                  : "Downloading Update..."}
               </AlertDialogTitle>
               <AlertDialogDescription asChild>
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin shrink-0" />
-                    <span>{updateStatus === "installing" ? "Installing, app will restart..." : "Downloading update..."}</span>
-                  </div>
-                  {updateProgress && updateProgress.total > 0 && (
-                    <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-                      <div
-                        className="bg-primary h-full transition-[width] duration-300"
-                        style={{ width: `${Math.min(100, (updateProgress.downloaded / updateProgress.total) * 100)}%` }}
-                      />
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 text-foreground font-medium">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-primary shrink-0" />
+                      <span>
+                        {updateStatus === "installing"
+                          ? "Applying update package..."
+                          : progressInfo.percent !== null && progressInfo.percent > 0
+                          ? "Downloading update package..."
+                          : "Connecting to server..."}
+                      </span>
                     </div>
-                  )}
+                    <span className="font-mono text-xs text-muted-foreground shrink-0 tabular-nums">
+                      {updateStatus === "installing" ? "100%" : progressInfo.text}
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-muted/80 rounded-full h-2 overflow-hidden relative">
+                    {updateStatus === "installing" ? (
+                      <div
+                        className="bg-primary h-full rounded-full transition-[width] duration-300 ease-out"
+                        style={{ width: "100%" }}
+                      />
+                    ) : progressInfo.percent !== null ? (
+                      <div
+                        className="bg-primary h-full rounded-full transition-[width] duration-75 ease-out"
+                        style={{ width: `${progressInfo.percent}%` }}
+                      />
+                    ) : (
+                      <div className="absolute inset-y-0 bg-primary/90 rounded-full animate-indeterminate" />
+                    )}
+                  </div>
+
+                  <p className="text-[11px] text-muted-foreground">
+                    {updateStatus === "installing"
+                      ? "Termix will restart automatically once installation completes."
+                      : "Please keep Termix open while the download completes."}
+                  </p>
                 </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -450,15 +495,52 @@ function App() {
         </AlertDialog>
 
         <AlertDialog open={updateStatus === "error"} onOpenChange={(open) => { if (!open) dismissUpdate(); }}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Update Check Failed</AlertDialogTitle>
-              <AlertDialogDescription>
-                {useUpdateStore.getState().error || "An unknown error occurred while checking for updates."}
+          <AlertDialogContent className="sm:max-w-md p-6">
+            <AlertDialogHeader className="text-left space-y-3">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <AlertDialogTitle className="text-base font-semibold text-foreground">
+                  {errorDetails.title}
+                </AlertDialogTitle>
+              </div>
+              <AlertDialogDescription asChild>
+                <div className="space-y-3 pt-1">
+                  <p className="text-sm text-foreground/90 leading-relaxed">
+                    {errorDetails.description}
+                  </p>
+                  {updateError && (
+                    <details className="group rounded-md border border-border/60 bg-muted/20 p-2.5 text-xs">
+                      <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground transition-colors select-none flex items-center gap-1.5">
+                        <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90 shrink-0" />
+                        <span>Error details</span>
+                      </summary>
+                      <pre className="mt-2 font-mono text-[11px] text-muted-foreground whitespace-pre-wrap break-all select-text overflow-x-auto max-h-32 p-2 rounded bg-background/60 border border-border/40">
+                        {updateError}
+                      </pre>
+                    </details>
+                  )}
+                </div>
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>OK</AlertDialogCancel>
+            <AlertDialogFooter className="pt-2">
+              <AlertDialogCancel onClick={dismissUpdate}>
+                {errorDetails.canRetry ? "Cancel" : "Close"}
+              </AlertDialogCancel>
+              {errorDetails.canRetry && (
+                <AlertDialogAction
+                  onClick={() => {
+                    dismissUpdate();
+                    if (errorDetails.retryAction === "download") {
+                      void downloadAndInstall();
+                    } else {
+                      void checkForUpdate({ explicit: true });
+                    }
+                  }}
+                >
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                  Try Again
+                </AlertDialogAction>
+              )}
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

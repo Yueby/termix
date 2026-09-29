@@ -502,7 +502,7 @@ function CheckUpdateButton() {
   return (
     <button
       className="flex w-full items-center justify-between rounded-md bg-muted/50 px-3 py-2 text-sm hover:bg-muted transition-colors cursor-pointer disabled:opacity-50"
-      onClick={checkForUpdate}
+      onClick={() => checkForUpdate({ explicit: true })}
       disabled={isChecking}
     >
       <span className="text-muted-foreground">Update</span>

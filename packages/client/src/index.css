@@ -183,3 +183,20 @@
 .animate-slide-in-left {
   animation: slide-in-left 0.2s ease-out both;
 }
+
+@keyframes indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+.animate-indeterminate {
+  animation: indeterminate 1.6s ease-in-out infinite;
+  width: 40%;
+}
+
