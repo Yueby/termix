@@ -14,7 +14,9 @@
 #
 # The one addition is the link from an entry to the pull request it came from. That
 # project gets it by rendering a "(#123)" suffix in the commit subject, which commits
-# here do not have, so the number is taken from the GitHub API instead.
+# here do not have, so the number is taken from the GitHub API instead — exposed to
+# templates as `commit.remote`, since `commit.github` is deprecated and no longer
+# populated (git-cliff warns about it).
 
 [remote.github]
 owner = "Yueby"
@@ -30,7 +32,7 @@ body = """
     - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
         {% if commit.breaking %}[**breaking**] {% endif %}\
         {{ commit.message | upper_first }}\
-        {% if commit.github.pr_number %} ([#{{ commit.github.pr_number }}]({{ self::remote_url() }}/pull/{{ commit.github.pr_number }})){% endif %} - \
+        {% if commit.remote.pr_number %} ([#{{ commit.remote.pr_number }}]({{ self::remote_url() }}/pull/{{ commit.remote.pr_number }})){% endif %} - \
         ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }}))\
 {% endmacro -%}
 
