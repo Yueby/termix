@@ -65,18 +65,14 @@ cargo test --manifest-path packages/client/src-tauri/Cargo.toml --lib -- --inclu
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/):
 `feat:`, `fix:`, `perf:`, `refactor:`, `docs:`, `test:`, `chore:`, `ci:`.
 
-`.github/cliff.toml` turns those into two things: the GitHub release body, and a new
-section in `CHANGELOG.md`.
+The commit history **is** the changelog. There is no changelog file to maintain:
+`.github/cliff.toml` turns the commits for a tag into the GitHub release notes, and
+the release workflow attaches them. Nothing is written by hand.
 
-- **Nothing needs writing by hand for a release.** The `changelog` job in
-  `release.yml` generates the section for the tag and prepends it.
-- **`## [Unreleased]` is only for work that is not committed yet.** Once it lands in a
-  commit, git-cliff can see it and the hand-written entry is redundant — fold it into
-  the release section and delete it.
-- **Keep the header in sync.** `header` in `cliff.toml` must match the opening block of
-  `CHANGELOG.md` byte for byte; that is the anchor git-cliff uses to know where a new
-  section belongs. The release-notes step passes `--strip header`, so the header never
-  leaks into a release body.
+That makes commit subjects the reader-facing text, so describe what the change does
+rather than how it was made. Note the parsers **skip merge commits**: each one carries
+the PR title *and* the subject of the commit it merged, which would list every change
+twice.
 
 ## Releasing
 
@@ -172,10 +168,6 @@ GitHub's `/releases/latest` deliberately **excludes drafts and prereleases**. So
 the release sits as a draft, no installed client can see it — which is the point: it
 gives you a window to check the build before anyone is offered it. The update reaches
 users the moment you publish.
-
-The `changelog` job then prepends the new section to `CHANGELOG.md` and commits it to
-`main` with `[skip ci]`. If `main` is protected, allow the bot to push or move that
-step into a follow-up pull request.
 
 ## Platform support
 

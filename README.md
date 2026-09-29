@@ -91,7 +91,8 @@ pnpm tauri build
 
 Bug reports, feature requests and pull requests are welcome — see
 [CONTRIBUTING.md](./CONTRIBUTING.md) for the development setup, the checks CI runs,
-and the release process. Changes are listed in [CHANGELOG.md](./CHANGELOG.md).
+and the release process. Each release’s notes are on the
+[releases page](https://github.com/Yueby/termix/releases).
 
 ## License
 

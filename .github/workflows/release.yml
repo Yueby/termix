@@ -113,31 +113,3 @@ jobs:
           # shipping the manifest that updates depend on).
           uploadUpdaterJson: true
           args: ${{ matrix.args }}
-
-  changelog:
-    name: Update CHANGELOG.md
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: main
-
-      - name: Prepend the new section
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: .github/cliff.toml
-          args: --latest --prepend CHANGELOG.md
-
-      - name: Commit back to main
-        run: |
-          if git diff --quiet -- CHANGELOG.md; then
-            echo "CHANGELOG.md already up to date."
-            exit 0
-          fi
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          git commit -m "docs: update changelog for ${{ inputs.tag || github.ref_name }} [skip ci]"
-          git push origin main

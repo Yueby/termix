@@ -87,7 +87,7 @@ pnpm tauri build
 ## 参与贡献
 
 欢迎提交问题、功能建议和拉取请求 —— 开发环境搭建、CI 会跑的检查项以及发布流程见
-[CONTRIBUTING.md](./CONTRIBUTING.md)。变更记录见 [CHANGELOG.md](./CHANGELOG.md)。
+[CONTRIBUTING.md](./CONTRIBUTING.md)。各版本的变更记录见[发布页面](https://github.com/Yueby/termix/releases)。
 
 ## 许可证
 
