@@ -1,5 +1,7 @@
 use tauri::State;
 
+use crate::commands::settings::{AppSettings, SyncBackend};
+use crate::services::api::{PushOutcome, TermixApi};
 use crate::services::crypto;
 use crate::services::db::Database;
 use crate::services::webdav::WebDavClient;
@@ -55,10 +57,224 @@ async fn fetch_json<T: serde::de::DeserializeOwned>(
     }
 }
 
+/// The whole vault as one payload.
+///
+/// One blob rather than a file per section: the server guards a single version, so the parts
+/// have to move together or a pull could take a newer connections list with an older
+/// keychain.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct VaultBundle {
+    /// Payload format, so a later change can be told apart from this one.
+    format: u32,
+    connections: Vec<crate::commands::connection::ConnectionInfo>,
+    snippets: Vec<crate::commands::snippet::Snippet>,
+    keychain: Vec<crate::commands::keychain::KeychainItem>,
+    settings: crate::commands::settings::AppSettings,
+}
+
+const VAULT_FORMAT: u32 = 1;
+
+/// Strips everything that describes how *this* installation reaches the remote.
+///
+/// The WebDAV credentials, the server token, the sync password and the version this machine
+/// has seen belong to the machine holding them. Carrying them would point the other machine
+/// at somebody else's server, or hand it a secret it cannot use — and the version would make
+/// it believe it had already seen a state it never downloaded.
+fn portable_settings(settings: &AppSettings) -> AppSettings {
+    let mut out = settings.clone();
+    out.sync_backend = SyncBackend::None;
+    out.webdav_url = String::new();
+    out.webdav_username = String::new();
+    out.webdav_password = String::new();
+    out.webdav_remote_dir = String::new();
+    out.server_url = String::new();
+    out.server_token = String::new();
+    out.sync_encryption_password = String::new();
+    out.vault_version = 0;
+    out
+}
+
+/// Restores the local fields the bundle deliberately does not carry.
+fn merge_local_settings(incoming: &mut AppSettings, local: &AppSettings, version: i64) {
+    incoming.sync_backend = local.sync_backend;
+    incoming.webdav_url = local.webdav_url.clone();
+    incoming.webdav_username = local.webdav_username.clone();
+    incoming.webdav_password = local.webdav_password.clone();
+    incoming.webdav_remote_dir = local.webdav_remote_dir.clone();
+    incoming.server_url = local.server_url.clone();
+    incoming.server_token = local.server_token.clone();
+    incoming.sync_encryption_password = local.sync_encryption_password.clone();
+    incoming.vault_version = version;
+}
+
+async fn build_vault(
+    db: &Database,
+    settings: &AppSettings,
+    sync_pw: &str,
+) -> Result<String, String> {
+    let mut connections = db.get_connections().await.map_err(|e| e.to_string())?;
+    for conn in connections.iter_mut() {
+        conn.password = sync_encrypt(&conn.password, sync_pw)?;
+        conn.key_path = sync_encrypt(&conn.key_path, sync_pw)?;
+        conn.key_passphrase = sync_encrypt(&conn.key_passphrase, sync_pw)?;
+        if let Some(crate::services::proxy::ProxyMode::Custom(config)) = conn.proxy.as_mut() {
+            config.password = sync_encrypt(&config.password, sync_pw)?;
+        }
+    }
+
+    let mut keychain = db.get_keychain_items().await.map_err(|e| e.to_string())?;
+    for item in keychain.iter_mut() {
+        item.private_key = sync_encrypt(&item.private_key, sync_pw)?;
+        item.public_key = sync_encrypt(&item.public_key, sync_pw)?;
+        item.certificate = sync_encrypt(&item.certificate, sync_pw)?;
+        item.passphrase = sync_encrypt(&item.passphrase, sync_pw)?;
+    }
+
+    let bundle = VaultBundle {
+        format: VAULT_FORMAT,
+        connections,
+        snippets: db.get_snippets().await.map_err(|e| e.to_string())?,
+        keychain,
+        settings: portable_settings(settings),
+    };
+
+    serde_json::to_string(&bundle).map_err(|e| e.to_string())
+}
+
+/// Imports a bundle and returns how many records it carried.
+async fn apply_vault(
+    db: &Database,
+    settings: &AppSettings,
+    sync_pw: &str,
+    json: &str,
+    version: i64,
+) -> Result<String, String> {
+    let mut bundle: VaultBundle = serde_json::from_str(json)
+        .map_err(|e| format!("the remote vault could not be parsed: {e}"))?;
+
+    if bundle.format != VAULT_FORMAT {
+        return Err(format!(
+            "the remote vault is format {}, this build understands {}",
+            bundle.format, VAULT_FORMAT
+        ));
+    }
+
+    for conn in bundle.connections.iter_mut() {
+        conn.password = sync_decrypt(&conn.password, sync_pw)?;
+        conn.key_path = sync_decrypt(&conn.key_path, sync_pw)?;
+        conn.key_passphrase = sync_decrypt(&conn.key_passphrase, sync_pw)?;
+        if let Some(crate::services::proxy::ProxyMode::Custom(config)) = conn.proxy.as_mut() {
+            config.password = sync_decrypt(&config.password, sync_pw)?;
+        }
+    }
+    for item in bundle.keychain.iter_mut() {
+        item.private_key = sync_decrypt(&item.private_key, sync_pw)?;
+        item.public_key = sync_decrypt(&item.public_key, sync_pw)?;
+        item.certificate = sync_decrypt(&item.certificate, sync_pw)?;
+        item.passphrase = sync_decrypt(&item.passphrase, sync_pw)?;
+    }
+
+    let counts = (
+        bundle.connections.len(),
+        bundle.snippets.len(),
+        bundle.keychain.len(),
+    );
+
+    for conn in bundle.connections {
+        db.save_connection(&conn).await.map_err(|e| e.to_string())?;
+    }
+    for snippet in bundle.snippets {
+        db.save_snippet(&snippet).await.map_err(|e| e.to_string())?;
+    }
+    for item in bundle.keychain {
+        db.save_keychain_item(&item)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    merge_local_settings(&mut bundle.settings, settings, version);
+    db.save_settings(&bundle.settings)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "{} connections, {} snippets, {} keychain items",
+        counts.0, counts.1, counts.2
+    ))
+}
+
+async fn termix_push(db: &Database, settings: &AppSettings) -> Result<String, String> {
+    if settings.server_url.is_empty() {
+        return Err("Server URL not configured".into());
+    }
+    let sync_pw = crypto::decrypt_secret(
+        &settings.sync_encryption_password,
+        "the sync encryption password",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let payload = build_vault(db, settings, &sync_pw).await?;
+    let api = TermixApi::new(&settings.server_url, &settings.server_token);
+    let next = settings.vault_version + 1;
+
+    match api.push(&payload, next).await.map_err(|e| e.to_string())? {
+        PushOutcome::Written => {
+            let mut updated = settings.clone();
+            updated.vault_version = next;
+            db.save_settings(&updated)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(format!("Pushed version {next}"))
+        }
+        PushOutcome::Conflict { server_version } => {
+            // The remote moved on while this machine was working. Pull rather than force:
+            // the server's version is the one that was accepted, and overwriting it would
+            // discard whatever the other machine wrote.
+            let summary = termix_pull(db, settings).await?;
+            Ok(format!(
+                "The server already had version {server_version}; pulled it instead ({summary})"
+            ))
+        }
+    }
+}
+
+async fn termix_pull(db: &Database, settings: &AppSettings) -> Result<String, String> {
+    if settings.server_url.is_empty() {
+        return Err("Server URL not configured".into());
+    }
+
+    let api = TermixApi::new(&settings.server_url, &settings.server_token);
+    let remote = api.pull().await.map_err(|e| e.to_string())?;
+
+    let Some(data) = remote.data else {
+        return Ok("Nothing to pull: the server has no vault yet".into());
+    };
+    if remote.version <= settings.vault_version {
+        return Ok(format!(
+            "Already up to date at version {}",
+            settings.vault_version
+        ));
+    }
+
+    let sync_pw = crypto::decrypt_secret(
+        &settings.sync_encryption_password,
+        "the sync encryption password",
+    )
+    .map_err(|e| e.to_string())?;
+
+    let summary = apply_vault(db, settings, &sync_pw, &data, remote.version).await?;
+    Ok(format!("Pulled version {} ({summary})", remote.version))
+}
+
 #[tauri::command]
 pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
     log::info!("sync_push: starting");
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+
+    match settings.sync_backend {
+        SyncBackend::None => return Err("Sync is off. Choose where to sync to in Settings.".into()),
+        SyncBackend::Termix => return termix_push(&db, &settings).await,
+        SyncBackend::Webdav => {}
+    }
     if settings.webdav_url.is_empty() {
         return Err("WebDAV URL not configured".into());
     }
@@ -155,6 +371,12 @@ pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
 pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
     log::info!("sync_pull: starting");
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+
+    match settings.sync_backend {
+        SyncBackend::None => return Err("Sync is off. Choose where to sync to in Settings.".into()),
+        SyncBackend::Termix => return termix_pull(&db, &settings).await,
+        SyncBackend::Webdav => {}
+    }
     if settings.webdav_url.is_empty() {
         return Err("WebDAV URL not configured".into());
     }
@@ -319,8 +541,26 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn sync_test_connection(db: State<'_, Database>) -> Result<String, String> {
-    log::info!("sync_test_connection: testing WebDAV connectivity");
+    log::info!("sync_test_connection: testing connectivity");
     let settings = db.get_settings().await.map_err(|e| e.to_string())?;
+
+    if settings.sync_backend == SyncBackend::Termix {
+        if settings.server_url.is_empty() {
+            return Err("Server URL not configured".into());
+        }
+        let api = TermixApi::new(&settings.server_url, &settings.server_token);
+        // Reachability first, so a wrong token is not reported as an unreachable server.
+        api.health().await.map_err(|e| e.to_string())?;
+        let vault = api.pull().await.map_err(|e| e.to_string())?;
+        return Ok(match vault.data {
+            Some(_) => format!("Reached the server. It holds version {}.", vault.version),
+            None => "Reached the server. It has no vault yet.".to_string(),
+        });
+    }
+
+    if settings.sync_backend == SyncBackend::None {
+        return Err("Sync is off. Choose where to sync to in Settings.".into());
+    }
     if settings.webdav_url.is_empty() {
         return Err("WebDAV URL not configured".into());
     }
