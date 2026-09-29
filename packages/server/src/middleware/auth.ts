@@ -1,72 +1,30 @@
 import { createMiddleware } from "hono/factory";
-import * as jose from "jose";
 import type { AppEnv } from "../types";
-
-export const JWT_ALG = "HS256";
-export const ACCESS_TOKEN_TTL = "15m";
-export const REFRESH_TOKEN_TTL = "30d";
+import { timingSafeEqual } from "../utils/crypto";
 
 /**
- * Access and refresh tokens are signed with the same key, so the only thing that tells
- * them apart is the audience. Without it a refresh token is accepted anywhere an access
- * token is, which quietly turns a 30-day credential into a bearer token that logout and
- * rotation cannot revoke.
- */
-export const ACCESS_AUDIENCE = "termix:access";
-export const REFRESH_AUDIENCE = "termix:refresh";
-
-export async function signAccessToken(userId: string, secret: string): Promise<string> {
-  const key = new TextEncoder().encode(secret);
-  return new jose.SignJWT({ sub: userId })
-    .setProtectedHeader({ alg: JWT_ALG })
-    .setAudience(ACCESS_AUDIENCE)
-    .setIssuedAt()
-    .setExpirationTime(ACCESS_TOKEN_TTL)
-    .sign(key);
-}
-
-export async function signRefreshToken(
-  userId: string,
-  tokenId: string,
-  secret: string,
-): Promise<string> {
-  const key = new TextEncoder().encode(secret);
-  return new jose.SignJWT({ sub: userId, jti: tokenId })
-    .setProtectedHeader({ alg: JWT_ALG })
-    .setAudience(REFRESH_AUDIENCE)
-    .setIssuedAt()
-    .setExpirationTime(REFRESH_TOKEN_TTL)
-    .sign(key);
-}
-
-/**
- * Verifies a token and pins both the algorithm and the audience. Pinning the algorithm
- * keeps a token signed with anything but HS256 from being considered, and pinning the
- * audience is what separates the two token kinds.
+ * Guards every route behind one shared token.
  *
- * Tokens issued before the audience was added will no longer verify; that is the point —
- * the refresh-token-as-access-token path is exactly what has to stop working.
+ * A private deployment has a single operator, so there is nothing for an account system to
+ * tell apart — and a password hash is the wrong thing to spend on a Worker, where the free
+ * plan allows 10 ms of CPU per request and Cloudflare's own documentation puts
+ * authentication at 10-20 ms.
+ *
+ * An unconfigured token is refused rather than read as "no auth" — that distinction is the
+ * difference between a closed vault and an open one.
  */
-export async function verifyToken(token: string, secret: string, audience: string) {
-  const key = new TextEncoder().encode(secret);
-  return jose.jwtVerify(token, key, { audience, algorithms: [JWT_ALG] });
-}
+export const requireToken = createMiddleware<AppEnv>(async (c, next) => {
+  const configured = c.var.apiToken;
+  if (!configured) {
+    return c.json({ error: "Server token is not configured" }, 500);
+  }
 
-export const requireAuth = createMiddleware<AppEnv>(async (c, next) => {
   const header = c.req.header("Authorization");
-  if (!header?.startsWith("Bearer ")) {
+  const presented = header?.startsWith("Bearer ") ? header.slice(7) : "";
+
+  if (!presented || !timingSafeEqual(presented, configured)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
-  const token = header.slice(7);
-  try {
-    const { payload } = await verifyToken(token, c.var.jwtSecret, ACCESS_AUDIENCE);
-    if (typeof payload.sub !== "string") {
-      return c.json({ error: "Invalid token payload" }, 401);
-    }
-    c.set("userId", payload.sub);
-    await next();
-  } catch {
-    return c.json({ error: "Invalid or expired token" }, 401);
-  }
+  await next();
 });

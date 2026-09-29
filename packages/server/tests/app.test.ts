@@ -8,28 +8,23 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AppContext } from "../src/app";
 import { createApp } from "../src/app";
 import { createSqliteDatabase } from "../src/db/sqlite";
-import { createWebCryptoHasher } from "../src/utils/crypto";
+
+const TOKEN = "test-token-0123456789abcdef";
 
 let app: ReturnType<typeof createApp>;
+let context: AppContext;
 let dbPath: string;
 
 beforeEach(() => {
   dbPath = join(tmpdir(), `termix-test-${randomUUID()}.db`);
   // The migrations the deployment runs, not a copy of the schema written by hand. A
   // migration that does not apply, or that describes the wrong columns, now fails here
-  // instead of on someone first deploy.
+  // instead of on somebody's first deploy.
   const raw = new Database(dbPath);
   migrate(drizzle(raw), { migrationsFolder: join(import.meta.dirname, "..", "drizzle") });
   raw.close();
 
-  const context: AppContext = {
-    db: createSqliteDatabase(dbPath),
-    // PBKDF2 rather than argon2: this is the hasher the Worker uses, it has no native
-    // dependency, and password strength is not what these tests are about.
-    hasher: createWebCryptoHasher(),
-    jwtSecret: "test-secret-not-used-outside-these-tests",
-    turnstileSecret: "",
-  };
+  context = { db: createSqliteDatabase(dbPath), apiToken: TOKEN };
   app = createApp(() => context);
 });
 
@@ -38,183 +33,120 @@ afterEach(async () => {
   await unlink(dbPath).catch(() => {});
 });
 
-function register(username: string) {
-  return app.request("/auth/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password: "correct horse battery" }),
+function authed(path: string, init: RequestInit = {}) {
+  return app.request(path, {
+    ...init,
+    headers: { ...init.headers, Authorization: `Bearer ${TOKEN}` },
   });
 }
 
-async function registerAndGetTokens(username: string) {
-  const res = await register(username);
-  expect(res.status).toBe(200);
-  return (await res.json()) as { accessToken: string; refreshToken: string; userId: string };
-}
-
-function authed(path: string, token: string, init: RequestInit = {}) {
-  return app.request(path, {
-    ...init,
-    headers: { ...init.headers, Authorization: `Bearer ${token}` },
+function push(body: { data: string; version: number }) {
+  return authed("/sync/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
 describe("app assembly", () => {
   it("reaches the database, so the context middleware runs before the routes", async () => {
-    // Registration touches the database, the hasher and the signing key. It can only
-    // succeed if all three arrived in the request context — which is exactly what did not
-    // happen when the context middleware was registered after the routes: every request
-    // was routed and answered from an empty context.
-    const res = await register("someone");
+    // A query can only succeed if the database arrived in the request context — which is
+    // exactly what did not happen while the context middleware was registered after the
+    // routes: every request was routed and answered from an empty context.
+    const res = await authed("/sync/status");
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ username: "someone" });
+    expect(await res.json()).toMatchObject({ version: 0 });
   });
 
-  it("serves health without a database", async () => {
-    const res = await app.request("/health");
-    expect(res.status).toBe(200);
+  it("serves health without a token", async () => {
+    // A liveness check that needs a credential cannot tell "up" from "wrong token".
+    expect((await app.request("/health")).status).toBe(200);
   });
 });
 
-describe("token kinds", () => {
-  it("refuses a refresh token used as an access token", async () => {
-    const { refreshToken } = await registerAndGetTokens("alice");
-    const res = await authed("/devices", refreshToken);
+describe("token authentication", () => {
+  it("refuses a request with no token", async () => {
+    expect((await app.request("/sync/status")).status).toBe(401);
+  });
+
+  it("refuses a wrong token", async () => {
+    const res = await app.request("/sync/status", {
+      headers: { Authorization: "Bearer not-the-token" },
+    });
     expect(res.status).toBe(401);
   });
 
-  it("accepts the access token it just issued", async () => {
-    const { accessToken } = await registerAndGetTokens("bob");
-    const res = await authed("/devices", accessToken);
-    expect(res.status).toBe(200);
+  it("refuses a token that is only a prefix of the real one", async () => {
+    const res = await app.request("/sync/status", {
+      headers: { Authorization: `Bearer ${TOKEN.slice(0, -1)}` },
+    });
+    expect(res.status).toBe(401);
   });
 
-  it("refuses a garbage bearer token", async () => {
-    const res = await authed("/devices", "not-a-token");
+  it("refuses a token presented without the Bearer scheme", async () => {
+    const res = await app.request("/sync/status", { headers: { Authorization: TOKEN } });
     expect(res.status).toBe(401);
+  });
+
+  it("accepts the configured token", async () => {
+    expect((await authed("/sync/status")).status).toBe(200);
+  });
+
+  it("refuses every request when the server has no token configured", async () => {
+    // Reading an unconfigured token as "auth is off" is the difference between a closed
+    // vault and an open one.
+    const unconfigured = createApp(() => ({ ...context, apiToken: "" }));
+    const res = await unconfigured.request("/sync/status", {
+      headers: { Authorization: "Bearer anything-at-all" },
+    });
+    expect(res.status).toBe(500);
   });
 });
 
-describe("sync pushes", () => {
+describe("the vault", () => {
+  it("reports an empty vault before anything is pushed", async () => {
+    expect(await (await authed("/sync/pull")).json()).toMatchObject({ data: null, version: 0 });
+    expect(await (await authed("/sync/status")).json()).toMatchObject({ version: 0 });
+  });
+
+  it("stores what is pushed and returns it", async () => {
+    expect((await push({ data: "v1", version: 1 })).status).toBe(200);
+    expect(await (await authed("/sync/pull")).json()).toMatchObject({ data: "v1", version: 1 });
+    expect(await (await authed("/sync/status")).json()).toMatchObject({ version: 1 });
+  });
+
   it("accepts a newer version and refuses an older one", async () => {
-    const { accessToken } = await registerAndGetTokens("carol");
+    await push({ data: "v2", version: 2 });
 
-    const first = await authed("/sync/push", accessToken, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: "v2", version: 2 }),
-    });
-    expect(first.status).toBe(200);
+    expect((await push({ data: "stale", version: 1 })).status).toBe(409);
+    // A rejected push must not have written anything: this is the regression the
+    // read-then-write version check allowed, where a slower request carrying an older
+    // version could land last and overwrite newer data while both reported success.
+    expect(await (await authed("/sync/pull")).json()).toMatchObject({ data: "v2", version: 2 });
+  });
 
-    const stale = await authed("/sync/push", accessToken, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: "stale", version: 1 }),
-    });
-    expect(stale.status).toBe(409);
-
-    // A rejected push must not have written anything: this is the regression the read-
-    // then-write version check allowed, where a slower request carrying an older version
-    // could land last and overwrite newer data while both requests reported success.
-    const pull = await authed("/sync/pull", accessToken);
-    expect(await pull.json()).toMatchObject({ data: "v2", version: 2 });
+  it("says what the server holds when it refuses a push", async () => {
+    await push({ data: "v3", version: 3 });
+    const conflict = await push({ data: "old", version: 2 });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ serverVersion: 3 });
   });
 
   it("lets two concurrent first pushes settle without a server error", async () => {
-    const { accessToken } = await registerAndGetTokens("dave");
-
-    const push = (version: number) =>
-      authed("/sync/push", accessToken, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data: `v${version}`, version }),
-      });
-
-    // The unique owner constraint used to make the loser of this race a 500.
-    const codes = (await Promise.all([push(1), push(1)])).map((r) => r.status).sort();
+    const codes = (
+      await Promise.all([push({ data: "a", version: 1 }), push({ data: "b", version: 1 })])
+    )
+      .map((r) => r.status)
+      .sort();
     expect(codes).toEqual([200, 409]);
   });
 
-  it("keeps one account's data out of another's", async () => {
-    const alice = await registerAndGetTokens("erin");
-    const bob = await registerAndGetTokens("frank");
-
-    await authed("/sync/push", alice.accessToken, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data: "alice-only", version: 5 }),
-    });
-
-    const pull = await authed("/sync/pull", bob.accessToken);
-    expect(await pull.json()).toMatchObject({ data: null, version: 0 });
-  });
-});
-
-describe("refresh rotation", () => {
-  function refresh(refreshToken: string) {
-    return app.request("/auth/refresh", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refreshToken }),
-    });
-  }
-
-  it("issues a new pair and spends the old token", async () => {
-    const { refreshToken } = await registerAndGetTokens("grace");
-
-    const first = await refresh(refreshToken);
-    expect(first.status).toBe(200);
-    const rotated = (await first.json()) as { accessToken: string; refreshToken: string };
-    expect(rotated.refreshToken).not.toBe(refreshToken);
-
-    // Spending the token is the whole point of rotating it.
-    expect((await refresh(refreshToken)).status).toBe(401);
-
-    // And the replacement works.
-    expect((await authed("/devices", rotated.accessToken)).status).toBe(200);
+  it("rejects a payload over the size limit", async () => {
+    const huge = "x".repeat(10 * 1024 * 1024 + 1);
+    expect((await push({ data: huge, version: 1 })).status).toBe(400);
   });
 
-  it("lets only one of two simultaneous refreshes win", async () => {
-    const { refreshToken } = await registerAndGetTokens("heidi");
-
-    // Nothing forces the interleaving, so this is a best-effort guard: the deterministic
-    // guarantee is that the claim is a single statement, and this only tries to notice if
-    // that ever stops being true.
-    const codes = (await Promise.all([refresh(refreshToken), refresh(refreshToken)]))
-      .map((r) => r.status)
-      .sort();
-    expect(codes).toEqual([200, 401]);
-  });
-
-  it("refuses an access token presented as a refresh token", async () => {
-    // The mirror of the audience check: the two kinds are not interchangeable in either
-    // direction.
-    const { accessToken } = await registerAndGetTokens("ivan");
-    expect((await refresh(accessToken)).status).toBe(401);
-  });
-
-  it("refuses a token that was never issued", async () => {
-    expect((await refresh("not-a-token")).status).toBe(401);
-  });
-});
-
-describe("turnstile", () => {
-  it("requires a token when a secret is configured", async () => {
-    const context: AppContext = {
-      db: createSqliteDatabase(dbPath),
-      hasher: createWebCryptoHasher(),
-      jwtSecret: "secret",
-      turnstileSecret: "a-configured-secret",
-    };
-    const guarded = createApp(() => context);
-
-    // Rejected before any network call, so this is testable offline.
-    const res = await guarded.request("/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: "whoever", password: "whatever" }),
-    });
-    expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: "CAPTCHA token required" });
+  it("rejects a malformed body", async () => {
+    expect((await push({ data: "x", version: 0 })).status).toBe(400);
   });
 });

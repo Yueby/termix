@@ -3,8 +3,9 @@ main = "src/worker.ts"
 compatibility_date = "2024-12-01"
 
 # Secrets (set via `wrangler secret put`):
-#   JWT_SECRET
-#   TURNSTILE_SECRET
+#   TERMIX_TOKEN — the shared token every client sends as `Authorization: Bearer …`.
+#                  Generate it with `openssl rand -hex 32` and put the same value in the
+#                  client's sync settings.
 
 [[d1_databases]]
 binding = "DB"

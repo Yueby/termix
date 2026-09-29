@@ -3,9 +3,11 @@ import { eq, lt } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { schema } from "../db";
-import { requireAuth } from "../middleware/auth";
+import { requireToken } from "../middleware/auth";
 import type { AppEnv } from "../types";
-import { generateId } from "../utils/id";
+
+/** The one vault row. A private deployment has no second account to keep apart from it. */
+const VAULT_ID = "vault";
 
 const MAX_SYNC_SIZE = 10 * 1024 * 1024; // 10MB
 
@@ -15,16 +17,13 @@ const pushSchema = z.object({
 });
 
 export const syncRoutes = new Hono<AppEnv>()
-  .use("/*", requireAuth)
+  .use("/*", requireToken)
 
   .get("/status", async (c) => {
-    const db = c.var.db;
-    const userId = c.var.userId;
-
-    const record = await db
+    const record = await c.var.db
       .select({ version: schema.syncData.version, updatedAt: schema.syncData.updatedAt })
       .from(schema.syncData)
-      .where(eq(schema.syncData.userId, userId))
+      .where(eq(schema.syncData.id, VAULT_ID))
       .get();
 
     if (!record) {
@@ -34,13 +33,10 @@ export const syncRoutes = new Hono<AppEnv>()
   })
 
   .get("/pull", async (c) => {
-    const db = c.var.db;
-    const userId = c.var.userId;
-
-    const record = await db
+    const record = await c.var.db
       .select()
       .from(schema.syncData)
-      .where(eq(schema.syncData.userId, userId))
+      .where(eq(schema.syncData.id, VAULT_ID))
       .get();
 
     if (!record) {
@@ -52,18 +48,17 @@ export const syncRoutes = new Hono<AppEnv>()
   .post("/push", zValidator("json", pushSchema), async (c) => {
     const { data, version } = c.req.valid("json");
     const db = c.var.db;
-    const userId = c.var.userId;
 
     // One statement, because a read followed by a separate write is what let a slower
     // request overwrite a newer version: with version 1 stored, pushes carrying 2 and 3
     // both read 1, and whichever wrote last won. The version predicate belongs in the
     // statement itself so the comparison and the write cannot be interleaved, and the
-    // upsert keeps two simultaneous first pushes from colliding on the unique owner.
+    // upsert keeps two simultaneous first pushes from colliding on the primary key.
     const written = await db
       .insert(schema.syncData)
-      .values({ id: generateId(), userId, data, version, updatedAt: new Date() })
+      .values({ id: VAULT_ID, data, version, updatedAt: new Date() })
       .onConflictDoUpdate({
-        target: schema.syncData.userId,
+        target: schema.syncData.id,
         set: { data, version, updatedAt: new Date() },
         setWhere: lt(schema.syncData.version, version),
       })
@@ -74,7 +69,7 @@ export const syncRoutes = new Hono<AppEnv>()
       const current = await db
         .select({ version: schema.syncData.version })
         .from(schema.syncData)
-        .where(eq(schema.syncData.userId, userId))
+        .where(eq(schema.syncData.id, VAULT_ID))
         .get();
       return c.json(
         { error: "Version conflict", serverVersion: current?.version ?? version },
