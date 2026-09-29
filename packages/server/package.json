@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.worker.json",
     "build": "tsup",
     "deploy": "wrangler deploy",
     "db:generate": "drizzle-kit generate",

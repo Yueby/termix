@@ -1,18 +1,20 @@
 import { serve } from "@hono/node-server";
 import { createApp } from "./app";
-import { createSqliteDatabase } from "./db";
+import { createSqliteDatabase } from "./db/sqlite";
 import { createArgon2Hasher } from "./utils/crypto";
 
 const DB_PATH = process.env.DB_PATH || "./data/termix.db";
-const JWT_SECRET = process.env.JWT_SECRET;
 const TURNSTILE_SECRET = process.env.TURNSTILE_SECRET || "";
 const PORT = parseInt(process.env.PORT || "3000", 10);
 
-if (!JWT_SECRET) {
-  throw new Error("JWT_SECRET environment variable is required");
-}
-
 async function main() {
+  // Read and validate inside main() so the value stays narrowed to `string` at the
+  // point of use; a module-scope guard does not carry into a function body.
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new Error("JWT_SECRET environment variable is required");
+  }
+
   const db = createSqliteDatabase(DB_PATH);
   const hasher = await createArgon2Hasher();
   const corsOrigins = process.env.CORS_ORIGIN?.split(",").map((s) => s.trim());
@@ -21,7 +23,7 @@ async function main() {
   app.use("*", async (c, next) => {
     c.set("db", db);
     c.set("hasher", hasher);
-    c.set("jwtSecret", JWT_SECRET);
+    c.set("jwtSecret", jwtSecret);
     c.set("turnstileSecret", TURNSTILE_SECRET);
     await next();
   });
@@ -30,4 +32,9 @@ async function main() {
   serve({ fetch: app.fetch, port: PORT });
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  // Exit non-zero: a server that refused to start because it is misconfigured must not
+  // look like a successful run to a supervisor or a container runtime.
+  console.error(err);
+  process.exit(1);
+});

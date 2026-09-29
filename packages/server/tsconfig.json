@@ -1,4 +1,11 @@
 {
+  // Base config only. This package ships two runtimes (Node for self-hosting, Workers
+  // for the deployment in wrangler.toml), and one tsconfig cannot describe both: the
+  // Workers globals and the Node globals collide. It is therefore typechecked twice,
+  // by tsconfig.node.json and tsconfig.worker.json — run `pnpm typecheck`, not tsc.
+  //
+  // Nothing here is inherited by those two except `compilerOptions`: `include`,
+  // `exclude` and `files` are not inherited through `extends`, so each sets its own.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -11,11 +18,11 @@
     "isolatedModules": true,
     "noEmit": true,
     "lib": ["ES2022"],
-    "types": ["node"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "*.ts"]
+  "include": ["src", "*.ts"],
+  "exclude": ["dist"]
 }

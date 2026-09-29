@@ -1,5 +1,19 @@
 export type HashAlgorithm = "argon2" | "pbkdf2";
 
+/**
+ * Compares two hex digests without an early exit on the first differing character, so
+ * that the comparison does not reveal how much of the expected value a caller guessed.
+ * Lengths are compared first; for the fixed-size digests used here that leaks nothing.
+ */
+export function timingSafeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 export interface PasswordHasher {
   algorithm: HashAlgorithm;
   hash(password: string): Promise<string>;
@@ -71,7 +85,7 @@ export function createWebCryptoHasher(): PasswordHasher & { algorithm: "pbkdf2" 
       const [saltHex, hashHex] = stored.split(":");
       const salt = fromHex(saltHex);
       const derived = await deriveKey(password, salt);
-      return toHex(derived) === hashHex;
+      return timingSafeEqualHex(toHex(derived), hashHex);
     },
   };
 }

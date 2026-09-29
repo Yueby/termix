@@ -1,0 +1,9 @@
+{
+  // Node / self-hosted target: src/server.ts plus everything it can reach.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src", "*.ts"],
+  "exclude": ["dist", "src/worker.ts"]
+}

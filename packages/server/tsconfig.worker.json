@@ -1,0 +1,11 @@
+{
+  // Cloudflare Workers target. Only src/worker.ts and what it imports is meaningful
+  // here; the Node entry point and the better-sqlite3 factory are excluded because they
+  // depend on Node built-ins and a native addon.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["@cloudflare/workers-types"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["dist", "src/server.ts", "src/db/sqlite.ts"]
+}

@@ -6,7 +6,7 @@ import { schema } from "../db";
 import { requireAuth, signAccessToken, signRefreshToken, verifyToken } from "../middleware/auth";
 import { verifyTurnstile } from "../middleware/turnstile";
 import type { AppEnv } from "../types";
-import { verifyWithAlgorithm, type HashAlgorithm } from "../utils/crypto";
+import { timingSafeEqualHex, verifyWithAlgorithm, type HashAlgorithm } from "../utils/crypto";
 import { generateId } from "../utils/id";
 
 const REFRESH_TOKEN_DAYS = 30;
@@ -115,7 +115,7 @@ export const authRoutes = new Hono<AppEnv>()
       }
 
       const tokenHash = await hashToken(refreshToken);
-      if (stored.tokenHash !== tokenHash) {
+      if (!timingSafeEqualHex(stored.tokenHash, tokenHash)) {
         return c.json({ error: "Invalid refresh token" }, 401);
       }
 
