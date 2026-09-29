@@ -184,6 +184,54 @@ describe("sync pushes", () => {
   });
 });
 
+describe("refresh rotation", () => {
+  function refresh(refreshToken: string) {
+    return app.request("/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    });
+  }
+
+  it("issues a new pair and spends the old token", async () => {
+    const { refreshToken } = await registerAndGetTokens("grace");
+
+    const first = await refresh(refreshToken);
+    expect(first.status).toBe(200);
+    const rotated = (await first.json()) as { accessToken: string; refreshToken: string };
+    expect(rotated.refreshToken).not.toBe(refreshToken);
+
+    // Spending the token is the whole point of rotating it.
+    expect((await refresh(refreshToken)).status).toBe(401);
+
+    // And the replacement works.
+    expect((await authed("/devices", rotated.accessToken)).status).toBe(200);
+  });
+
+  it("lets only one of two simultaneous refreshes win", async () => {
+    const { refreshToken } = await registerAndGetTokens("heidi");
+
+    // Nothing forces the interleaving, so this is a best-effort guard: the deterministic
+    // guarantee is that the claim is a single statement, and this only tries to notice if
+    // that ever stops being true.
+    const codes = (await Promise.all([refresh(refreshToken), refresh(refreshToken)]))
+      .map((r) => r.status)
+      .sort();
+    expect(codes).toEqual([200, 401]);
+  });
+
+  it("refuses an access token presented as a refresh token", async () => {
+    // The mirror of the audience check: the two kinds are not interchangeable in either
+    // direction.
+    const { accessToken } = await registerAndGetTokens("ivan");
+    expect((await refresh(accessToken)).status).toBe(401);
+  });
+
+  it("refuses a token that was never issued", async () => {
+    expect((await refresh("not-a-token")).status).toBe(401);
+  });
+});
+
 describe("turnstile", () => {
   it("requires a token when a secret is configured", async () => {
     const context: AppContext = {

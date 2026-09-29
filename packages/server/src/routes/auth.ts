@@ -1,5 +1,5 @@
 import { zValidator } from "@hono/zod-validator";
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { schema } from "../db";
@@ -7,7 +7,6 @@ import { requireAuth, REFRESH_AUDIENCE, signAccessToken, signRefreshToken, verif
 import { verifyTurnstile } from "../middleware/turnstile";
 import type { AppEnv } from "../types";
 import {
-  timingSafeEqualHex,
   verifyWithAlgorithm,
   type HashAlgorithm,
   type PasswordHasher,
@@ -133,20 +132,32 @@ export const authRoutes = new Hono<AppEnv>()
     try {
       const { payload } = await verifyToken(refreshToken, c.var.jwtSecret, REFRESH_AUDIENCE);
       const tokenId = payload.jti as string;
-      const userId = payload.sub as string;
-
-      const stored = await db.select().from(schema.refreshTokens).where(eq(schema.refreshTokens.id, tokenId)).get();
-      if (!stored || stored.expiresAt < new Date()) {
-        return c.json({ error: "Invalid refresh token" }, 401);
-      }
 
       const tokenHash = await hashToken(refreshToken);
-      if (!timingSafeEqualHex(stored.tokenHash, tokenHash)) {
+
+      // One statement claims the token: it has to match the id, match the stored hash and
+      // still be unexpired, and the delete is what consumes it. The previous shape read the
+      // row, compared it and deleted separately, so two requests presenting the same token
+      // both read it and both proceeded — a stolen token could race the legitimate client
+      // rather than being spent once — and the second delete's zero-row result was ignored.
+      // Whoever deletes the row wins; the loser is told to authenticate again.
+      const claimed = await db
+        .delete(schema.refreshTokens)
+        .where(
+          and(
+            eq(schema.refreshTokens.id, tokenId),
+            eq(schema.refreshTokens.tokenHash, tokenHash),
+            gt(schema.refreshTokens.expiresAt, new Date()),
+          ),
+        )
+        .returning({ userId: schema.refreshTokens.userId });
+
+      if (claimed.length !== 1) {
         return c.json({ error: "Invalid refresh token" }, 401);
       }
 
-      // Rotate: delete old, create new
-      await db.delete(schema.refreshTokens).where(eq(schema.refreshTokens.id, tokenId));
+      // The stored owner, not the one in the token: the database is authoritative.
+      const userId = claimed[0].userId;
 
       const newTokenId = generateId();
       const [accessToken, newRefreshToken] = await Promise.all([
