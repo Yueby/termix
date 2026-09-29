@@ -5,14 +5,15 @@
 # so grouping is by prefix rather than by PR label.
 
 [changelog]
-# Must match the header block at the top of CHANGELOG.md byte for byte — git-cliff
-# uses it to decide where a newly generated section gets inserted when `--prepend`
-# is used. The release-notes step passes `--strip header`, so this never appears in
-# a GitHub release body.
+# `header` is written when generating a changelog from scratch; `header_marker` is
+# what tells git-cliff where the header ends when *prepending* into an existing
+# file. The marker is more reliable than matching the header text, which silently
+# stops anchoring the moment the prose is edited.
 header = """# Changelog
 
 Notable changes to Termix, grouped by release.
 """
+header_marker = "<!-- git-cliff: end of header -->"
 trim = true
 body = """
 {% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}{% else %}## Unreleased{% endif %}
@@ -36,6 +37,10 @@ protect_breaking_commits = true
 tag_pattern = "v[0-9]*"
 sort_commits = "oldest"
 commit_parsers = [
+  # A merge commit carries the PR title as its subject and the squashed commit's
+  # subject in its body, so leaving these in duplicates the entry right below and
+  # drags stray blank lines into the output. Must come before the catch-all.
+  { message = "^Merge ", skip = true },
   { message = "^feat", group = "Features" },
   { message = "^fix", group = "Bug Fixes" },
   { message = "^perf", group = "Performance" },
