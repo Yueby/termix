@@ -21,6 +21,9 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY packages/server/package.json packages/server/
 RUN pnpm install --frozen-lockfile --prod --filter @termix/server...
 COPY --from=build /app/packages/server/dist packages/server/dist
+# Shipped because the server applies migrations on startup: a fresh container that started
+# with an empty database would fail its first sync request instead of creating the table.
+COPY packages/server/drizzle packages/server/drizzle
 
 RUN mkdir -p /app/data
 ENV DB_PATH=/app/data/termix.db

@@ -1,6 +1,3 @@
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,13 +14,10 @@ let dbPath: string;
 
 beforeEach(() => {
   dbPath = join(tmpdir(), `termix-test-${randomUUID()}.db`);
-  // The migrations the deployment runs, not a copy of the schema written by hand. A
-  // migration that does not apply, or that describes the wrong columns, now fails here
-  // instead of on somebody's first deploy.
-  const raw = new Database(dbPath);
-  migrate(drizzle(raw), { migrationsFolder: join(import.meta.dirname, "..", "drizzle") });
-  raw.close();
 
+  // Deliberately not migrating here. `createSqliteDatabase` does it, so these tests exercise
+  // the same startup path a deployment does — a migration that stops being applied fails
+  // here rather than silently on somebody's first deploy.
   context = { db: createSqliteDatabase(dbPath), apiToken: TOKEN };
   app = createApp(() => context);
 });
