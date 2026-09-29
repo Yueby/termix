@@ -25,8 +25,50 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Runs first and fails fast. Everything below signs and publishes four platforms, so a
+  # mismatch caught here is four builds that never happen.
+  verify:
+    name: Verify the release is coherent
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the tag that was asked for. A manual run used to check out whatever
+          # revision it was dispatched from and then label those assets with the requested
+          # tag, so "rebuild v0.1.0" did not rebuild v0.1.0.
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Check the four version fields agree with the tag
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -uo pipefail
+          expected="${TAG#v}"
+          fail=0
+
+          check() {
+            local label="$1" actual="$2"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::$label says $actual, the tag says $expected"
+              fail=1
+            else
+              echo "$label: $actual"
+            fi
+          }
+
+          # Four files carry the product version and nothing kept them in step; the
+          # documented bump is four manual edits. The tag is the authority here.
+          check "tauri.conf.json"     "$(node -p "require('./packages/client/src-tauri/tauri.conf.json').version")"
+          check "client package.json" "$(node -p "require('./packages/client/package.json').version")"
+          check "server package.json" "$(node -p "require('./packages/server/package.json').version")"
+          check "Cargo.toml"          "$(grep -m1 '^version = ' packages/client/src-tauri/Cargo.toml | cut -d'\"' -f2)"
+
+          exit "$fail"
+
   build:
     name: ${{ matrix.label }}
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -48,16 +90,10 @@ jobs:
             args: ""
             targets: ""
     runs-on: ${{ matrix.platform }}
-    env:
-      # Updater artifacts are signed with this key; the matching public key lives in
-      # tauri.conf.json. `bundle.createUpdaterArtifacts` is true, so a missing or
-      # mismatched key fails the build outright rather than producing an unusable
-      # update.
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       # Version comes from `packageManager` — do not pin it here too.
@@ -104,6 +140,16 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater artifacts are signed with this key; the matching public key lives in
+          # tauri.conf.json, and `bundle.createUpdaterArtifacts` makes a missing or
+          # mismatched key fail the build rather than produce an unusable update.
+          #
+          # Scoped to this step rather than the job. At job level the key was inherited by
+          # dependency installation, the release-note generator and every third-party
+          # action, so a compromised install script or action could read the key that
+          # signs what users auto-install.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: packages/client
           tagName: ${{ inputs.tag || github.ref_name }}
