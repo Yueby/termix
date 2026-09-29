@@ -40,15 +40,9 @@ jobs:
       # `build` is `tsc && vite build`, so this covers the typecheck too.
       - run: pnpm --filter @termix/client build
 
-  # Advisory: packages/server has never been typechecked before (its tsconfig asked
-  # for `node` types without declaring them), and turning that on surfaced a handful
-  # of real errors there. None of them affect the desktop app, and fixing them means
-  # deciding how the package should type itself for Node *and* Workers, so the job
-  # reports rather than blocks. Tracked in the release notes.
   server:
-    name: Server (typecheck, advisory)
+    name: Server (typecheck)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
@@ -61,7 +55,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      - run: pnpm --filter @termix/server exec tsc --noEmit
+      # This package ships two runtimes — Node for self-hosting, Workers for the
+      # deployment described in wrangler.toml — and a single tsconfig cannot describe
+      # both, because the Workers globals and the Node globals collide. `typecheck`
+      # therefore runs tsc twice, once per target, and both must pass.
+      - run: pnpm --filter @termix/server typecheck
 
   rust:
     name: Rust (check + test)
@@ -95,11 +93,24 @@ jobs:
       # `cargo test --lib -- --include-ignored` while a proxy is available.
       - run: cargo test --manifest-path packages/client/src-tauri/Cargo.toml --lib
 
-  # Advisory only: the codebase is not rustfmt-clean and clippy reports a handful of
-  # design-level warnings (mostly "too many arguments"). Neither may fail the build
-  # yet, but they run so the debt stays visible.
-  rust-lint:
-    name: Rust lint (advisory)
+  # Formatting is gated: the tree is rustfmt-clean, so a diff here is a new one.
+  rust-format:
+    name: Rust (format)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - run: cargo fmt --manifest-path packages/client/src-tauri/Cargo.toml -- --check
+
+  # Advisory: the remaining warnings are design-level — argument counts on signatures
+  # shaped by the IPC contract, and one wide tuple type — not defects. They report so
+  # the debt stays visible without blocking a fix.
+  rust-clippy:
+    name: Rust clippy (advisory)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -107,7 +118,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: clippy
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -117,7 +128,5 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ env.TAURI_LINUX_DEPS }}
-
-      - run: cargo fmt --manifest-path packages/client/src-tauri/Cargo.toml -- --check
 
       - run: cargo clippy --manifest-path packages/client/src-tauri/Cargo.toml --all-targets
