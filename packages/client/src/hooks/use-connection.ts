@@ -40,8 +40,32 @@ function connectionForTab(tab: SessionTab): ConnectionInfo {
 export function useConnectionHandlers() {
   const { addTab, updateTab, removeTab } = useSessionStore();
 
+  const inFlightConnections = useRef<
+    Map<string, { attemptId: string; sessionId?: string; cancelled: boolean }>
+  >(new Map());
+
+  const cancelInFlight = useCallback((tabId: string) => {
+    const inFlight = inFlightConnections.current.get(tabId);
+    if (inFlight) {
+      inFlight.cancelled = true;
+      if (inFlight.sessionId) {
+        stopBuffering(inFlight.sessionId);
+      }
+      inFlightConnections.current.delete(tabId);
+    }
+  }, []);
+
   const doConnect = useCallback(
     async (tabId: string, conn: ConnectionInfo, password: string) => {
+      cancelInFlight(tabId);
+
+      const attempt = {
+        attemptId: crypto.randomUUID(),
+        sessionId: undefined as string | undefined,
+        cancelled: false,
+      };
+      inFlightConnections.current.set(tabId, attempt);
+
       const pushLog = (msg: string) => {
         const current = useSessionStore.getState().tabs.find((t) => t.id === tabId);
         const prev = current?.logs ?? [];
@@ -52,12 +76,22 @@ export function useConnectionHandlers() {
       updateTab(tabId, { status: "connecting", error: null });
       await delay(600);
 
+      const tabStillOpen = useSessionStore.getState().tabs.some((t) => t.id === tabId);
+      if (attempt.cancelled || !tabStillOpen) {
+        attempt.cancelled = true;
+        if (inFlightConnections.current.get(tabId) === attempt) {
+          inFlightConnections.current.delete(tabId);
+        }
+        return;
+      }
+
       pushLog(`Authenticating as ${conn.username} (${conn.authType})...`);
       updateTab(tabId, { status: "authenticating" });
 
       // The session id is generated here so the data channel is registered before
       // the backend can start producing output.
       const sessionId = crypto.randomUUID();
+      attempt.sessionId = sessionId;
       const onData = startBuffering(sessionId);
 
       try {
@@ -79,10 +113,23 @@ export function useConnectionHandlers() {
           } else {
             pushLog("Error: Selected keychain key not found and no key path configured.");
             updateTab(tabId, { status: "error", error: "Keychain key not found. Please re-select the key in host settings." });
+            stopBuffering(sessionId);
+            if (inFlightConnections.current.get(tabId) === attempt) {
+              inFlightConnections.current.delete(tabId);
+            }
             return;
           }
         } else {
           authMethod = { type: "key", key_path: conn.keyPath ?? "", passphrase: password || undefined };
+        }
+
+        if (attempt.cancelled || !useSessionStore.getState().tabs.some((t) => t.id === tabId)) {
+          attempt.cancelled = true;
+          stopBuffering(sessionId);
+          if (inFlightConnections.current.get(tabId) === attempt) {
+            inFlightConnections.current.delete(tabId);
+          }
+          return;
         }
 
         const result = await sshConnect(sessionId, {
@@ -93,10 +140,25 @@ export function useConnectionHandlers() {
           proxy: resolveProxyMode(conn.proxy, useSettingsStore.getState().proxy),
         }, onData);
 
+        const isTabStillOpen = useSessionStore.getState().tabs.some((t) => t.id === tabId);
+        if (attempt.cancelled || !isTabStillOpen) {
+          stopBuffering(sessionId);
+          await sshDisconnect(result.session_id).catch((e) =>
+            logger.warn("cleanup cancelled in-flight session failed:", e)
+          );
+          if (inFlightConnections.current.get(tabId) === attempt) {
+            inFlightConnections.current.delete(tabId);
+          }
+          return;
+        }
+
         pushLog("Session established.");
         updateTab(tabId, { status: "connected", sessionId: result.session_id });
         // The session is healthy again, so the retry budget resets.
         reconnectAttempts.current.delete(tabId);
+        if (inFlightConnections.current.get(tabId) === attempt) {
+          inFlightConnections.current.delete(tabId);
+        }
 
         if (conn.id && password) {
           useConnectionStore.getState().updateConnection(conn.id, {
@@ -106,11 +168,17 @@ export function useConnectionHandlers() {
         }
       } catch (err) {
         stopBuffering(sessionId);
-        pushLog(`Error: ${String(err)}`);
-        updateTab(tabId, { status: "error", error: String(err) });
+        if (inFlightConnections.current.get(tabId) === attempt) {
+          inFlightConnections.current.delete(tabId);
+        }
+        const isTabStillOpen = useSessionStore.getState().tabs.some((t) => t.id === tabId);
+        if (isTabStillOpen && !attempt.cancelled) {
+          pushLog(`Error: ${String(err)}`);
+          updateTab(tabId, { status: "error", error: String(err) });
+        }
       }
     },
-    [updateTab]
+    [updateTab, cancelInFlight]
   );
 
   const reconnectAttempts = useRef<Map<string, number>>(new Map());
@@ -129,6 +197,7 @@ export function useConnectionHandlers() {
   /** Re-opens a tab with its stored connection and credentials. */
   const reconnectTab = useCallback(
     (tabId: string) => {
+      cancelInFlight(tabId);
       const tab = useSessionStore.getState().tabs.find((t) => t.id === tabId);
       if (!tab) return;
       const conn =
@@ -137,7 +206,7 @@ export function useConnectionHandlers() {
       const credential = conn.authType === "password" ? conn.password : conn.keyPassphrase;
       doConnect(tabId, conn, credential ?? "");
     },
-    [doConnect]
+    [doConnect, cancelInFlight]
   );
 
   const handleConnect = useCallback(
@@ -178,6 +247,7 @@ export function useConnectionHandlers() {
 
   const handleSubmitAuth = useCallback(
     (tabId: string, password: string) => {
+      cancelInFlight(tabId);
       const { tabs: currentTabs } = useSessionStore.getState();
       const tab = currentTabs.find((t) => t.id === tabId);
       if (!tab) return;
@@ -192,12 +262,13 @@ export function useConnectionHandlers() {
         }, password);
       }
     },
-    [doConnect]
+    [doConnect, cancelInFlight]
   );
 
   const handleRetry = useCallback(
     (tabId: string) => {
       cancelReconnect(tabId);
+      cancelInFlight(tabId);
       const tab = useSessionStore.getState().tabs.find((t) => t.id === tabId);
       const conn = tab
         ? useConnectionStore.getState().connections.find((c) => c.id === tab.connectionId)
@@ -213,7 +284,7 @@ export function useConnectionHandlers() {
         updateTab(tabId, { status: "waiting_auth", error: null, sessionId: null });
       }
     },
-    [updateTab, reconnectTab, cancelReconnect]
+    [updateTab, reconnectTab, cancelReconnect, cancelInFlight]
   );
 
   const handleDisconnect = useCallback(
@@ -258,6 +329,7 @@ export function useConnectionHandlers() {
   );
 
   const disconnectTab = useCallback(async (tab: { sessionId: string | null; type: string; id: string }) => {
+    cancelInFlight(tab.id);
     if (tab.sessionId) {
       await stopBuffering(tab.sessionId);
       if (tab.type === "local") {
@@ -266,7 +338,7 @@ export function useConnectionHandlers() {
         await sshDisconnect(tab.sessionId).catch((e) => logger.warn("sshDisconnect failed:", tab.id, e));
       }
     }
-  }, []);
+  }, [cancelInFlight]);
 
   const captureAndSaveLog = useCallback((tab: { id: string; connectionId: string; title: string; host: string; username: string; type: string }) => {
     if (tab.type === "log") return;
@@ -291,38 +363,48 @@ export function useConnectionHandlers() {
 
   const handleCloseTab = useCallback(
     async (tabId: string) => {
+      cancelReconnect(tabId);
+      cancelInFlight(tabId);
       const { tabs: currentTabs } = useSessionStore.getState();
       const tab = currentTabs.find((t) => t.id === tabId);
-      cancelReconnect(tabId);
       if (tab) captureAndSaveLog(tab);
       removeTab(tabId);
       if (tab) await disconnectTab(tab);
     },
-    [removeTab, disconnectTab, captureAndSaveLog, cancelReconnect]
+    [removeTab, disconnectTab, captureAndSaveLog, cancelReconnect, cancelInFlight]
   );
 
   const handleCloseOtherTabs = useCallback(
     async (keepTabId: string) => {
       const { tabs: currentTabs, removeOtherTabs } = useSessionStore.getState();
       const others = currentTabs.filter((t) => t.id !== keepTabId);
-      others.forEach((t) => { cancelReconnect(t.id); captureAndSaveLog(t); });
+      others.forEach((t) => {
+        cancelReconnect(t.id);
+        cancelInFlight(t.id);
+        captureAndSaveLog(t);
+      });
       removeOtherTabs(keepTabId);
       await Promise.all(others.map(disconnectTab));
     },
-    [disconnectTab, captureAndSaveLog, cancelReconnect]
+    [disconnectTab, captureAndSaveLog, cancelReconnect, cancelInFlight]
   );
 
   const handleCloseAllTabs = useCallback(
     async () => {
       const { tabs: currentTabs, removeAllTabs } = useSessionStore.getState();
-      currentTabs.forEach((t) => { cancelReconnect(t.id); captureAndSaveLog(t); });
+      currentTabs.forEach((t) => {
+        cancelReconnect(t.id);
+        cancelInFlight(t.id);
+        captureAndSaveLog(t);
+      });
       removeAllTabs();
       await Promise.all(currentTabs.map(disconnectTab));
     },
-    [disconnectTab, captureAndSaveLog]
+    [disconnectTab, captureAndSaveLog, cancelReconnect, cancelInFlight]
   );
 
   const handleOpenLocal = useCallback(async () => {
+    let sessionId: string | null = null;
     try {
       const shellId = useSettingsStore.getState().defaultShell;
       let shell: string | undefined;
@@ -337,7 +419,7 @@ export function useConnectionHandlers() {
         }
       }
 
-      const sessionId = crypto.randomUUID();
+      sessionId = crypto.randomUUID();
       const onData = startBuffering(sessionId);
       const result = await localOpen(sessionId, onData, 80, 24, shell, shellArgs);
 
@@ -360,6 +442,10 @@ export function useConnectionHandlers() {
         authType: "password",
       });
     } catch (err) {
+      if (sessionId) {
+        stopBuffering(sessionId);
+        localClose(sessionId).catch(() => {});
+      }
       logger.error("Failed to open local terminal:", err);
     }
   }, [addTab]);

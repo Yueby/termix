@@ -85,6 +85,15 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
     void refreshSystemProxy();
   }, [refreshSystemProxy, editingHostId]);
 
+  const selectedKey = keychainItems.find((k) => k.id === keychainId);
+
+  useEffect(() => {
+    if (conn && keychainId && !selectedKey && keychainItems.length > 0) {
+      setKeychainId("");
+      updateConnection(conn.id, { keychainId: "" });
+    }
+  }, [keychainId, selectedKey, keychainItems, conn?.id, updateConnection]);
+
   if (!conn) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -96,15 +105,6 @@ export function HostDetail({ onConnect, onClose }: HostDetailProps) {
   const save = (patch: Partial<ConnectionInfo>) => {
     updateConnection(conn.id, patch);
   };
-
-  const selectedKey = keychainItems.find((k) => k.id === keychainId);
-
-  useEffect(() => {
-    if (keychainId && !selectedKey && keychainItems.length > 0) {
-      setKeychainId("");
-      updateConnection(conn.id, { keychainId: "" });
-    }
-  }, [keychainId, selectedKey, keychainItems, conn.id, updateConnection]);
 
   const handleSelectKey = (keyId: string) => {
     setKeychainId(keyId);
