@@ -21,6 +21,8 @@ Built with **Tauri v2** + **React** + **Rust**
 ## Features
 
 - **SSH Terminal** — Connect to remote hosts via SSH with password or key-based authentication
+- **Auto Reconnect** — A dropped SSH session is retried automatically with a growing delay, and every session end is logged with its reason
+- **Proxy Support** — Reach hosts through SOCKS5 or HTTP CONNECT, set globally or per connection, including a mode that follows the operating system’s own proxy settings
 - **Local Terminal** — Open local shell sessions with configurable shell profiles
 - **SFTP File Manager** — Dual-pane file browser with drag-and-drop upload, permissions editor, and transfer queue
 - **Keychain** — Securely manage SSH private keys with encrypted storage
@@ -54,8 +56,8 @@ key it was released with.
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 18+
-- [pnpm](https://pnpm.io/)
+- [Node.js](https://nodejs.org/) 24 — Vite 8 needs 22.12 or newer
+- [pnpm](https://pnpm.io/) 11 — pinned via `packageManager`, so `corepack enable` is enough
 - [Rust](https://www.rust-lang.org/tools/install)
 - Platform-specific Tauri [prerequisites](https://v2.tauri.app/start/prerequisites/)
 
