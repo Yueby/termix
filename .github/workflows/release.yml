@@ -90,6 +90,10 @@ jobs:
       - name: Generate release notes
         id: notes
         uses: orhun/git-cliff-action@v4
+        env:
+          # git-cliff resolves each commit to the pull request it came from and looks up
+          # contributors through the GitHub API, which needs a token.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           config: .github/cliff.toml
           args: --latest --strip header

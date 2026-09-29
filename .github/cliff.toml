@@ -1,48 +1,114 @@
 # git-cliff configuration.
 #
-# Produces the GitHub release notes for a tag; see the release workflow. There is no
-# CHANGELOG.md in this repository — the changelog *is* the release notes, derived from
-# the commit history rather than maintained by hand.
+# Produces the GitHub release notes for a tag. There is no CHANGELOG.md in this
+# repository — the notes are the changelog.
 #
-# Commits follow the conventional-commit style already in use here, so grouping is by
-# prefix rather than by PR label.
+# The shape follows the tool's own cliff.toml, which generates the changelog it
+# publishes itself. Two things are deliberately not carried over from it:
+#
+#   * its `{ message = "^[a-z]+\\s*:", skip = true }` rule, which drops every commit
+#     without a scope. That is a convention of that project; here it would empty the
+#     notes.
+#   * its `typos --write-changes` preprocessor, which needs a binary the runner does
+#     not have.
+#
+# The one addition is the link from an entry to the pull request it came from. That
+# project gets it by rendering a "(#123)" suffix in the commit subject, which commits
+# here do not have, so the number is taken from the GitHub API instead.
+
+[remote.github]
+owner = "Yueby"
+repo = "termix"
 
 [changelog]
-trim = true
 body = """
-{% if version %}## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}{% else %}## Unreleased{% endif %}
-{% for group, commits in commits | group_by(attribute="group") %}
-### {{ group }}
+{%- macro remote_url() -%}
+  https://github.com/{{ remote.github.owner }}/{{ remote.github.repo }}
+{%- endmacro -%}
 
-{% for commit in commits %}\
-- {% if commit.scope %}**{{ commit.scope }}:** {% endif %}{{ commit.message | upper_first }}
-{% endfor %}
-{% endfor %}
+{% macro print_commit(commit) -%}
+    - {% if commit.scope %}*({{ commit.scope }})* {% endif %}\
+        {% if commit.breaking %}[**breaking**] {% endif %}\
+        {{ commit.message | upper_first }}\
+        {% if commit.github.pr_number %} ([#{{ commit.github.pr_number }}]({{ self::remote_url() }}/pull/{{ commit.github.pr_number }})){% endif %} - \
+        ([{{ commit.id | truncate(length=7, end="") }}]({{ self::remote_url() }}/commit/{{ commit.id }}))\
+{% endmacro -%}
+
+{% if version %}\
+    {% if previous.version %}\
+        ## [{{ version | trim_start_matches(pat="v") }}]\
+          ({{ self::remote_url() }}/compare/{{ previous.version }}..{{ version }}) - {{ timestamp | date(format="%Y-%m-%d") }}
+    {% else %}\
+        ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+    {% endif %}\
+{% else %}\
+    ## [unreleased]
+{% endif %}\
+
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits
+    | filter(attribute="scope")
+    | sort(attribute="scope") %}
+        {{ self::print_commit(commit=commit) }}
+    {%- endfor %}
+    {% for commit in commits %}
+        {%- if not commit.scope -%}
+            {{ self::print_commit(commit=commit) }}
+        {% endif -%}
+    {% endfor -%}
+{% endfor -%}
+
+{%- if github -%}
+{% if github.contributors | filter(attribute="is_first_time", value=true) | length != 0 %}
+  ## New Contributors
+{% endif %}\
+{% for contributor in github.contributors | filter(attribute="is_first_time", value=true) %}
+  * @{{ contributor.username }} made their first contribution
+    {%- if contributor.pr_number %} in \
+      [#{{ contributor.pr_number }}]({{ self::remote_url() }}/pull/{{ contributor.pr_number }}) \
+    {%- endif %}
+{%- endfor -%}
+{%- endif %}
 """
-footer = ""
+trim = true
+
+# The preprocessors below emit a `<REPO>` placeholder; this expands it, so the owner
+# and repo only have to be written once.
+postprocessors = [
+  { pattern = '<REPO>', replace = "https://github.com/Yueby/termix" },
+]
 
 [git]
 conventional_commits = true
-# Keep non-conventional subjects (`Update .gitignore`, `Initial commit`) rather than
-# dropping them silently — they land in "Other".
-filter_unconventional = false
+# Drop subjects that are not conventional commits ("Initial commit", "Update
+# .gitignore"): a release note is read by users, and those say nothing about the
+# release. Anything worth listing should be a `feat:`/`fix:`/… commit.
+filter_unconventional = true
 split_commits = false
-protect_breaking_commits = true
-tag_pattern = "v[0-9]*"
-sort_commits = "oldest"
-commit_parsers = [
-  # A merge commit carries the PR title as its subject and the squashed commit's
-  # subject in its body, so leaving these in duplicates the entry right below and
-  # drags stray blank lines into the output. Must come before the catch-all.
-  { message = "^Merge ", skip = true },
-  { message = "^feat", group = "Features" },
-  { message = "^fix", group = "Bug Fixes" },
-  { message = "^perf", group = "Performance" },
-  { message = "^refactor", group = "Refactoring" },
-  { message = "^style", group = "Styling" },
-  { message = "^docs", group = "Documentation" },
-  { message = "^test", group = "Testing" },
-  { message = "^chore\\(deps\\)", group = "Dependencies" },
-  { message = "^chore|^ci|^build", group = "Maintenance" },
-  { message = ".*", group = "Other" },
+commit_preprocessors = [
+  # A squash-merged subject carries "(#123)"; make it a link.
+  { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](<REPO>/pull/${2}))" },
 ]
+commit_parsers = [
+  # A merge commit repeats the PR title *and* the subject of the commit it merged, so
+  # leaving these in lists every change twice. Must come before the catch-all.
+  { message = "^Merge ", skip = true },
+  # The `<!-- N -->` prefixes exist only to fix the order the groups render in; the
+  # heading strips them again.
+  { message = "^feat", group = "<!-- 0 -->Features" },
+  { message = "^fix", group = "<!-- 1 -->Bug Fixes" },
+  { message = "^refactor", group = "<!-- 2 -->Refactoring" },
+  { message = "^perf", group = "<!-- 3 -->Performance" },
+  { message = "^docs", group = "<!-- 4 -->Documentation" },
+  { message = "^test", group = "<!-- 5 -->Testing" },
+  { message = "^style", group = "<!-- 6 -->Styling" },
+  { message = "^chore\\(deps", group = "<!-- 7 -->Dependencies" },
+  { message = "^chore|^ci|^build", group = "<!-- 8 -->Maintenance" },
+  { message = ".*", group = "<!-- 9 -->Other" },
+]
+protect_breaking_commits = true
+filter_commits = false
+tag_pattern = "v[0-9].*"
+topo_order = false
+sort_commits = "oldest"
