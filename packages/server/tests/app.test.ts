@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/better-sqlite3";
+import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,52 +10,16 @@ import { createApp } from "../src/app";
 import { createSqliteDatabase } from "../src/db/sqlite";
 import { createWebCryptoHasher } from "../src/utils/crypto";
 
-/**
- * Written out here rather than migrated in, because the package ships no migration files —
- * which is an open finding, and the reason a fresh deployment has no tables at all.
- * Kept in step with src/db/schema.ts by hand for now.
- */
-const SCHEMA = `
-CREATE TABLE users (
-  id TEXT PRIMARY KEY,
-  username TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  hash_algorithm TEXT NOT NULL DEFAULT 'argon2',
-  created_at INTEGER NOT NULL
-);
-CREATE TABLE devices (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  platform TEXT NOT NULL,
-  public_key TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX devices_user_id_idx ON devices(user_id);
-CREATE TABLE refresh_tokens (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  token_hash TEXT NOT NULL,
-  expires_at INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX refresh_tokens_user_id_idx ON refresh_tokens(user_id);
-CREATE TABLE sync_data (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-  data TEXT NOT NULL,
-  version INTEGER NOT NULL DEFAULT 1,
-  updated_at INTEGER NOT NULL
-);
-`;
-
 let app: ReturnType<typeof createApp>;
 let dbPath: string;
 
 beforeEach(() => {
   dbPath = join(tmpdir(), `termix-test-${randomUUID()}.db`);
+  // The migrations the deployment runs, not a copy of the schema written by hand. A
+  // migration that does not apply, or that describes the wrong columns, now fails here
+  // instead of on someone first deploy.
   const raw = new Database(dbPath);
-  raw.exec(SCHEMA);
+  migrate(drizzle(raw), { migrationsFolder: join(import.meta.dirname, "..", "drizzle") });
   raw.close();
 
   const context: AppContext = {

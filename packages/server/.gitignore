@@ -1,5 +1,4 @@
 dist/
 data/
-drizzle/
 .wrangler/
 .dev.vars
