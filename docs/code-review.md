@@ -47,27 +47,24 @@ Status legend: **fixed** means it is repaired in `main` with a test or a measure
 
 ## Open
 
-Two things, both needing a decision rather than a patch:
+One thing, needing a decision rather than a patch:
 
 - **The local encryption key is still an ordinary file beside the database.** It is private
   to the owning user now, but it remains the sole protection for every stored password and
   private key, so copying the application-data directory still yields them. Moving it into
   the platform credential store is the fix, and it needs a migration for existing installs —
   a wrong one loses every stored credential, which is why it is not being rushed.
-- **Applying migrations to D1 is still a manual step.** The baseline exists and the SQLite
-  path applies it, but D1 wants `wrangler d1 migrations apply` and Drizzle's folder layout
-  is not wrangler's. Nothing documents the bridge yet.
 
-Beyond those, the remaining items are small and were reported rather than fixed: the medium
-notes below were all addressed, so what is left is the pair above plus anything a future
-review finds.
+Everything else reported here is addressed. The two that were noted as remaining — the
+Docker build and how migrations reach D1 — have both been dealt with, the second verified by
+applying the migration to a local D1 database.
 
 ### Smaller, not addressed
 
-- The dead-field `#[allow(dead_code)]` on DB methods for incremental sync that nothing calls.
+- DB methods for incremental sync that nothing calls.
 - A WebDAV response is buffered in full with no size limit, unlike SFTP transfers.
-- PBKDF2 records store no per-record work factor, so the iteration count cannot be raised
-  without invalidating existing passwords.
+- PBKDF2 records store no per-record work factor — moot for the server now that it has no
+  passwords, and still true of the desktop client's own sync password derivation.
 
 ## Verification notes
 

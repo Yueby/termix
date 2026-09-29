@@ -11,3 +11,6 @@ compatibility_date = "2024-12-01"
 binding = "DB"
 database_name = "termix-db"
 database_id = ""
+# Drizzle generates the migrations into drizzle/, in the NNNN_name.sql form wrangler expects,
+# so point it there rather than maintaining a second copy under the default directory.
+migrations_dir = "drizzle"

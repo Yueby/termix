@@ -28,7 +28,7 @@ Built with **Tauri v2** + **React** + **Rust**
 - **Keychain** — Securely manage SSH private keys with encrypted storage
 - **Snippets** — Save and reuse frequently used commands with autocomplete
 - **Session Logs** — Automatically capture terminal snapshots when closing tabs, with read-only playback
-- **WebDAV Sync** — Sync connections and keychains across devices with encrypted WebDAV storage
+- **Sync** — Share connections and keychains across your machines. Either to a Termix server you deploy yourself, or to WebDAV storage you already have. The vault is encrypted on the client, so neither end can read it.
 - **Theme Support** — 13+ built-in terminal themes (Tokyo Night, Dracula, Nord, Catppuccin, etc.)
 - **Cross-Platform** — Runs on Windows, macOS, and Linux
 
