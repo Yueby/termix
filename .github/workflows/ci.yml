@@ -40,6 +40,10 @@ jobs:
       # `build` is `tsc && vite build`, so this covers the typecheck too.
       - run: pnpm --filter @termix/client build
 
+      # Pure logic only — key-type detection, which reads structured fields because a
+      # substring search over base64 gives random answers.
+      - run: pnpm --filter @termix/client test
+
   server:
     name: Server (typecheck)
     runs-on: ubuntu-latest
