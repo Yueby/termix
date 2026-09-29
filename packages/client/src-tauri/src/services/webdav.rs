@@ -48,7 +48,12 @@ impl WebDavClient {
         }
     }
 
-    pub async fn get(&self, path: &str) -> Result<String> {
+    /// Fetches a file, or reports that it is not there.
+    ///
+    /// `Ok(None)` means the server answered 404: a file that has never been pushed is
+    /// absent, which is not the same thing as a fetch that failed, and callers that sync a
+    /// first time need to tell those apart.
+    pub async fn get(&self, path: &str) -> Result<Option<String>> {
         let resp = self
             .client
             .get(self.url(path))
@@ -57,11 +62,19 @@ impl WebDavClient {
             .await
             .context("GET request failed")?;
 
-        if resp.status().is_success() {
-            Ok(resp.text().await.unwrap_or_default())
-        } else {
-            anyhow::bail!("GET {} returned {}", path, resp.status())
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
         }
+        if resp.status().is_success() {
+            // Not `unwrap_or_default`: a body that could not be read used to become an
+            // empty string, which parses as "nothing to import" rather than as a failure.
+            return Ok(Some(
+                resp.text()
+                    .await
+                    .context("could not read the response body")?,
+            ));
+        }
+        anyhow::bail!("GET {} returned {}", path, resp.status())
     }
 
     pub async fn put(&self, path: &str, body: &str) -> Result<()> {

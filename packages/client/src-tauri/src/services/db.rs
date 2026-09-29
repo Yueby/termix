@@ -3,6 +3,25 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Pool, Sqlite};
 use std::str::FromStr;
 
+/// Runs an additive migration, tolerating only the error that means it has already run.
+///
+/// The previous form discarded every result, so a database lock, a full disk or an
+/// unreadable schema was indistinguishable from "the column is already there": startup
+/// reported success and the first query that needed the column failed instead, far from
+/// the cause and with no hint of it.
+async fn add_column(pool: &Pool<Sqlite>, statement: &str) -> Result<()> {
+    match sqlx::query(statement).execute(pool).await {
+        Ok(_) => Ok(()),
+        // SQLite reports a repeated ADD COLUMN this way, and nothing else does.
+        Err(sqlx::Error::Database(error)) if error.message().contains("duplicate column name") => {
+            Ok(())
+        }
+        Err(error) => Err(anyhow::anyhow!(
+            "schema migration failed ({statement}): {error}"
+        )),
+    }
+}
+
 use crate::commands::connection::ConnectionInfo;
 use crate::commands::keychain::KeychainItem;
 use crate::commands::settings::AppSettings;
@@ -142,52 +161,57 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        let _ =
-            sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_password TEXT DEFAULT ''")
-                .execute(&self.pool)
-                .await;
-        let _ =
-            sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_path TEXT DEFAULT ''")
-                .execute(&self.pool)
-                .await;
-        let _ = sqlx::query(
+        add_column(
+            &self.pool,
+            "ALTER TABLE connections ADD COLUMN encrypted_password TEXT DEFAULT ''",
+        )
+        .await?;
+        add_column(
+            &self.pool,
+            "ALTER TABLE connections ADD COLUMN encrypted_key_path TEXT DEFAULT ''",
+        )
+        .await?;
+        add_column(
+            &self.pool,
             "ALTER TABLE connections ADD COLUMN encrypted_key_passphrase TEXT DEFAULT ''",
         )
-        .execute(&self.pool)
-        .await;
-        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN keychain_id TEXT DEFAULT ''")
-            .execute(&self.pool)
-            .await;
-        let _ =
-            sqlx::query("ALTER TABLE connections ADD COLUMN proxy_choice TEXT NOT NULL DEFAULT ''")
-                .execute(&self.pool)
-                .await;
-        let _ = sqlx::query(
+        .await?;
+        add_column(
+            &self.pool,
+            "ALTER TABLE connections ADD COLUMN keychain_id TEXT DEFAULT ''",
+        )
+        .await?;
+        add_column(
+            &self.pool,
+            "ALTER TABLE connections ADD COLUMN proxy_choice TEXT NOT NULL DEFAULT ''",
+        )
+        .await?;
+        add_column(
+            &self.pool,
             "ALTER TABLE connections ADD COLUMN encrypted_proxy_password TEXT NOT NULL DEFAULT ''",
         )
-        .execute(&self.pool)
-        .await;
+        .await?;
 
-        let _ = sqlx::query(
+        add_column(
+            &self.pool,
             "ALTER TABLE keychain ADD COLUMN encrypted_private_key TEXT NOT NULL DEFAULT ''",
         )
-        .execute(&self.pool)
-        .await;
-        let _ = sqlx::query(
+        .await?;
+        add_column(
+            &self.pool,
             "ALTER TABLE keychain ADD COLUMN encrypted_public_key TEXT NOT NULL DEFAULT ''",
         )
-        .execute(&self.pool)
-        .await;
-        let _ = sqlx::query(
+        .await?;
+        add_column(
+            &self.pool,
             "ALTER TABLE keychain ADD COLUMN encrypted_certificate TEXT NOT NULL DEFAULT ''",
         )
-        .execute(&self.pool)
-        .await;
-        let _ = sqlx::query(
+        .await?;
+        add_column(
+            &self.pool,
             "ALTER TABLE keychain ADD COLUMN encrypted_passphrase TEXT NOT NULL DEFAULT ''",
         )
-        .execute(&self.pool)
-        .await;
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS terminal_logs (

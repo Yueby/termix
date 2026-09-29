@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
@@ -24,20 +25,23 @@ pub struct ShellProfile {
 }
 
 struct LocalSession {
-    writer: Box<dyn Write + Send>,
+    /// Input is handed to a dedicated thread rather than written here. A shell that stops
+    /// reading its input fills the PTY pipe, and a blocking write would then hold the
+    /// session map's lock for as long as that lasts — freezing every other local terminal,
+    /// including the close that would have killed the process at fault.
+    writer_tx: std::sync::mpsc::Sender<Vec<u8>>,
     master: Box<dyn MasterPty + Send>,
-    #[allow(dead_code)]
     child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
 pub struct LocalTerminalManager {
-    sessions: Mutex<HashMap<String, LocalSession>>,
+    sessions: Arc<Mutex<HashMap<String, LocalSession>>>,
 }
 
 impl LocalTerminalManager {
     pub fn new() -> Self {
         Self {
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -74,8 +78,22 @@ impl LocalTerminalManager {
         let reader = pair.master.try_clone_reader()?;
         let writer = pair.master.take_writer()?;
 
+        // One writer thread per session, fed by a queue. Writing from the command handler
+        // would block on a full PTY pipe while holding the session map's lock; queueing
+        // keeps the handler responsive and confines the block to this thread.
+        let (writer_tx, writer_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            let mut writer = writer;
+            for chunk in writer_rx {
+                if let Err(error) = writer.write_all(&chunk).and_then(|()| writer.flush()) {
+                    log::warn!("Local terminal writer stopped: {error}");
+                    break;
+                }
+            }
+        });
+
         let session = LocalSession {
-            writer,
+            writer_tx,
             master: pair.master,
             child,
         };
@@ -92,6 +110,7 @@ impl LocalTerminalManager {
         );
 
         let sid = session_id.clone();
+        let sessions = self.sessions.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(200));
             let mut reader = reader;
@@ -119,6 +138,23 @@ impl LocalTerminalManager {
             log::info!(
                 "Local session {sid} ended: {reason} (undelivered output chunks: {delivery_failures})"
             );
+
+            // Take the entry out. Without this the map keeps a live-looking session for
+            // every shell that has exited, and everything behind it — the PTY, the writer
+            // thread, the process handle — stays around for the life of the app.
+            let ended = {
+                let mut map = sessions.blocking_lock();
+                map.remove(&sid)
+            };
+            // Reap the child. `kill` terminates a process but does not collect it, and a
+            // shell the user exited with `exit` was never reaped at all, so on Unix each
+            // one left a zombie until the app closed.
+            if let Some(mut ended) = ended {
+                if let Err(error) = ended.child.wait() {
+                    log::warn!("Session {sid}: could not reap the child process: {error}");
+                }
+            }
+
             let _ = app.emit(
                 "local_disconnect",
                 &LocalDisconnectEvent {
@@ -132,19 +168,19 @@ impl LocalTerminalManager {
     }
 
     pub async fn write(&self, session_id: &str, data: &[u8]) -> Result<()> {
-        let mut sessions = self.sessions.lock().await;
-        let session = sessions
-            .get_mut(session_id)
-            .ok_or_else(|| anyhow!("Local session not found: {}", session_id))?;
-        session
-            .writer
-            .write_all(data)
-            .map_err(|e| anyhow!("Write failed: {}", e))?;
-        session
-            .writer
-            .flush()
-            .map_err(|e| anyhow!("Flush failed: {}", e))?;
-        Ok(())
+        // The lock is released before the send, and the send queues the bytes rather than
+        // handing them to the PTY, so neither the map nor this task can be held up by a
+        // shell that has stopped reading.
+        let writer = {
+            let sessions = self.sessions.lock().await;
+            sessions
+                .get(session_id)
+                .map(|session| session.writer_tx.clone())
+                .ok_or_else(|| anyhow!("Local session not found: {}", session_id))?
+        };
+        writer
+            .send(data.to_vec())
+            .map_err(|_| anyhow!("Local session {} is no longer accepting input", session_id))
     }
 
     pub async fn resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<()> {
@@ -165,11 +201,20 @@ impl LocalTerminalManager {
     }
 
     pub async fn close(&self, session_id: &str) -> Result<()> {
-        let mut sessions = self.sessions.lock().await;
-        if let Some(mut session) = sessions.remove(session_id) {
+        let session = self.sessions.lock().await.remove(session_id);
+        if let Some(mut session) = session {
             if let Err(e) = session.child.kill() {
                 log::warn!(
                     "Failed to kill local terminal process {}: {}",
+                    session_id,
+                    e
+                );
+            }
+            // Reap it. `kill` terminates the process but does not collect it, so without
+            // this every closed terminal leaves a zombie behind.
+            if let Err(e) = session.child.wait() {
+                log::warn!(
+                    "Failed to reap local terminal process {}: {}",
                     session_id,
                     e
                 );

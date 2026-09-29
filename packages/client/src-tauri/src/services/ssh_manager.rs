@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -100,16 +101,21 @@ impl client::Handler for ClientHandler {
 struct Session {
     handle: client::Handle<ClientHandler>,
     writer: Arc<ChannelWriteHalf<client::Msg>>,
+    /// Distinguishes this session from a later one that reused the same id, so the task
+    /// cleaning up after a dead connection can tell whether it is still the current one.
+    generation: u64,
 }
 
 pub struct SshManager {
-    sessions: Mutex<HashMap<String, Session>>,
+    sessions: Arc<Mutex<HashMap<String, Session>>>,
+    next_generation: Arc<AtomicU64>,
 }
 
 impl SshManager {
     pub fn new() -> Self {
         Self {
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+            next_generation: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -203,9 +209,11 @@ impl SshManager {
 
         let (mut reader, writer) = channel.split();
 
+        let generation = self.next_generation.fetch_add(1, Ordering::Relaxed);
         let session = Session {
             handle,
             writer: Arc::new(writer),
+            generation,
         };
         self.sessions
             .lock()
@@ -224,6 +232,7 @@ impl SshManager {
 
         // Spawn a task to forward SSH output to the frontend over the channel
         let sid = session_id.clone();
+        let sessions = self.sessions.clone();
         tokio::spawn(async move {
             let mut delivery_failures: u64 = 0;
             while let Some(data) = rx.recv().await {
@@ -248,6 +257,26 @@ impl SshManager {
             log::info!(
                 "SSH session {sid} ended: {reason} (undelivered output chunks: {delivery_failures})"
             );
+
+            // Take the entry out, but only if it is still this session. A later connect can
+            // reuse the caller-supplied id, and this task belongs to the older connection:
+            // it must not evict or announce the replacement. Without the removal at all,
+            // every dropped connection left a live-looking entry in the map forever.
+            let still_current = {
+                let mut map = sessions.lock().await;
+                match map.get(&sid) {
+                    Some(session) if session.generation == generation => {
+                        map.remove(&sid);
+                        true
+                    }
+                    _ => false,
+                }
+            };
+            if !still_current {
+                log::info!("SSH session {sid} was already replaced; not reporting it as dropped");
+                return;
+            }
+
             let _ = app.emit(
                 "ssh_disconnect",
                 &SshDisconnectEvent {

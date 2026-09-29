@@ -36,6 +36,25 @@ fn sync_decrypt(encoded: &str, sync_pw: &str) -> Result<String, String> {
     }
 }
 
+/// Fetches one synced file and parses it.
+///
+/// `Ok(None)` is the ordinary first-pull case: the file has never been pushed. That is
+/// not a failure and must not be counted as one, which the previous shape could not
+/// express — it logged every outcome and answered "Pull completed" regardless.
+async fn fetch_json<T: serde::de::DeserializeOwned>(
+    client: &WebDavClient,
+    remote_dir: &str,
+    file: &str,
+) -> Result<Option<T>, String> {
+    match client.get(&format!("{remote_dir}/{file}")).await {
+        Ok(Some(body)) => serde_json::from_str(&body)
+            .map(Some)
+            .map_err(|e| format!("{file} could not be parsed: {e}")),
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("{file} could not be read: {e}")),
+    }
+}
+
 #[tauri::command]
 pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
     log::info!("sync_push: starting");
@@ -151,100 +170,151 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
 
     let remote_dir = normalize_remote_dir(&settings.webdav_remote_dir);
 
-    match client
-        .get(&format!("{}/connections.json", remote_dir))
-        .await
+    // What actually arrived. The old tail answered "Pull completed" after logging every
+    // failure, so a pull that read nothing at all still reported success.
+    let mut imported = 0usize;
+    let mut problems: Vec<String> = Vec::new();
+
+    match fetch_json::<Vec<crate::commands::connection::ConnectionInfo>>(
+        &client,
+        &remote_dir,
+        "connections.json",
+    )
+    .await
     {
-        Ok(conn_json) => match serde_json::from_str::<
-            Vec<crate::commands::connection::ConnectionInfo>,
-        >(&conn_json)
-        {
-            Ok(mut remote_conns) => {
-                for conn in remote_conns.iter_mut() {
-                    conn.password = sync_decrypt(&conn.password, &sync_pw)?;
-                    conn.key_path = sync_decrypt(&conn.key_path, &sync_pw)?;
-                    conn.key_passphrase = sync_decrypt(&conn.key_passphrase, &sync_pw)?;
-                    if let Some(crate::services::proxy::ProxyMode::Custom(config)) =
-                        conn.proxy.as_mut()
-                    {
-                        config.password = sync_decrypt(&config.password, &sync_pw)?;
-                    }
+        Ok(Some(mut remote_conns)) => {
+            for conn in remote_conns.iter_mut() {
+                conn.password = sync_decrypt(&conn.password, &sync_pw)?;
+                conn.key_path = sync_decrypt(&conn.key_path, &sync_pw)?;
+                conn.key_passphrase = sync_decrypt(&conn.key_passphrase, &sync_pw)?;
+                if let Some(crate::services::proxy::ProxyMode::Custom(config)) = conn.proxy.as_mut()
+                {
+                    config.password = sync_decrypt(&config.password, &sync_pw)?;
                 }
-                let count = remote_conns.len();
-                for conn in remote_conns {
-                    db.save_connection(&conn).await.map_err(|e| e.to_string())?;
-                }
-                log::info!("sync_pull: imported {} connections", count);
             }
-            Err(e) => log::warn!("sync_pull: failed to parse connections.json: {}", e),
-        },
-        Err(e) => log::warn!("sync_pull: failed to fetch connections.json: {}", e),
-    }
-
-    match client.get(&format!("{}/snippets.json", remote_dir)).await {
-        Ok(snip_json) => {
-            match serde_json::from_str::<Vec<crate::commands::snippet::Snippet>>(&snip_json) {
-                Ok(remote_snips) => {
-                    let count = remote_snips.len();
-                    for snip in remote_snips {
-                        db.save_snippet(&snip).await.map_err(|e| e.to_string())?;
-                    }
-                    log::info!("sync_pull: imported {} snippets", count);
-                }
-                Err(e) => log::warn!("sync_pull: failed to parse snippets.json: {}", e),
+            let count = remote_conns.len();
+            for conn in remote_conns {
+                db.save_connection(&conn).await.map_err(|e| e.to_string())?;
             }
+            log::info!("sync_pull: imported {} connections", count);
+            imported += 1;
         }
-        Err(e) => log::warn!("sync_pull: failed to fetch snippets.json: {}", e),
-    }
-
-    match client.get(&format!("{}/keychain.json", remote_dir)).await {
-        Ok(keychain_json) => match serde_json::from_str::<
-            Vec<crate::commands::keychain::KeychainItem>,
-        >(&keychain_json)
-        {
-            Ok(mut remote_items) => {
-                for item in remote_items.iter_mut() {
-                    item.private_key = sync_decrypt(&item.private_key, &sync_pw)?;
-                    item.public_key = sync_decrypt(&item.public_key, &sync_pw)?;
-                    item.certificate = sync_decrypt(&item.certificate, &sync_pw)?;
-                    item.passphrase = sync_decrypt(&item.passphrase, &sync_pw)?;
-                }
-                let count = remote_items.len();
-                for item in remote_items {
-                    db.save_keychain_item(&item)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                }
-                log::info!("sync_pull: imported {} keychain items", count);
-            }
-            Err(e) => log::warn!("sync_pull: failed to parse keychain.json: {}", e),
-        },
-        Err(e) => log::warn!("sync_pull: failed to fetch keychain.json: {}", e),
-    }
-
-    match client.get(&format!("{}/settings.json", remote_dir)).await {
-        Ok(settings_json) => {
-            match serde_json::from_str::<crate::commands::settings::AppSettings>(&settings_json) {
-                Ok(mut remote_settings) => {
-                    remote_settings.webdav_url = settings.webdav_url.clone();
-                    remote_settings.webdav_username = settings.webdav_username.clone();
-                    remote_settings.webdav_password = settings.webdav_password.clone();
-                    remote_settings.webdav_remote_dir = settings.webdav_remote_dir.clone();
-                    remote_settings.sync_encryption_password =
-                        settings.sync_encryption_password.clone();
-                    db.save_settings(&remote_settings)
-                        .await
-                        .map_err(|e| e.to_string())?;
-                    log::info!("sync_pull: imported settings");
-                }
-                Err(e) => log::warn!("sync_pull: failed to parse settings.json: {}", e),
-            }
+        Ok(None) => log::info!("sync_pull: no connections.json on the remote yet"),
+        Err(e) => {
+            log::warn!("sync_pull: {e}");
+            problems.push(e);
         }
-        Err(e) => log::warn!("sync_pull: failed to fetch settings.json: {}", e),
     }
 
-    log::info!("sync_pull: completed successfully");
-    Ok("Pull completed".into())
+    match fetch_json::<Vec<crate::commands::snippet::Snippet>>(
+        &client,
+        &remote_dir,
+        "snippets.json",
+    )
+    .await
+    {
+        Ok(Some(remote_snips)) => {
+            let count = remote_snips.len();
+            for snip in remote_snips {
+                db.save_snippet(&snip).await.map_err(|e| e.to_string())?;
+            }
+            log::info!("sync_pull: imported {} snippets", count);
+            imported += 1;
+        }
+        Ok(None) => log::info!("sync_pull: no snippets.json on the remote yet"),
+        Err(e) => {
+            log::warn!("sync_pull: {e}");
+            problems.push(e);
+        }
+    }
+
+    match fetch_json::<Vec<crate::commands::keychain::KeychainItem>>(
+        &client,
+        &remote_dir,
+        "keychain.json",
+    )
+    .await
+    {
+        Ok(Some(mut remote_items)) => {
+            for item in remote_items.iter_mut() {
+                item.private_key = sync_decrypt(&item.private_key, &sync_pw)?;
+                item.public_key = sync_decrypt(&item.public_key, &sync_pw)?;
+                item.certificate = sync_decrypt(&item.certificate, &sync_pw)?;
+                item.passphrase = sync_decrypt(&item.passphrase, &sync_pw)?;
+            }
+            let count = remote_items.len();
+            for item in remote_items {
+                db.save_keychain_item(&item)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            log::info!("sync_pull: imported {} keychain items", count);
+            imported += 1;
+        }
+        Ok(None) => log::info!("sync_pull: no keychain.json on the remote yet"),
+        Err(e) => {
+            log::warn!("sync_pull: {e}");
+            problems.push(e);
+        }
+    }
+
+    match fetch_json::<crate::commands::settings::AppSettings>(
+        &client,
+        &remote_dir,
+        "settings.json",
+    )
+    .await
+    {
+        Ok(Some(mut remote_settings)) => {
+            // These are per-installation: the address this machine reaches the remote
+            // through, and the credentials it uses to get there. Importing the remote's
+            // copies would point this installation at somebody else's server.
+            remote_settings.webdav_url = settings.webdav_url.clone();
+            remote_settings.webdav_username = settings.webdav_username.clone();
+            remote_settings.webdav_password = settings.webdav_password.clone();
+            remote_settings.webdav_remote_dir = settings.webdav_remote_dir.clone();
+            remote_settings.sync_encryption_password = settings.sync_encryption_password.clone();
+
+            // The global proxy password travels encrypted under the exporting machine's
+            // key, so it cannot be read here. Storing it anyway would leave this machine
+            // holding a value it can never decrypt and writing it back as though it were
+            // valid. The mode is portable; the password stays local.
+            if let (
+                crate::services::proxy::ProxyMode::Custom(remote),
+                crate::services::proxy::ProxyMode::Custom(local),
+            ) = (&mut remote_settings.proxy, &settings.proxy)
+            {
+                remote.password = local.password.clone();
+            }
+
+            db.save_settings(&remote_settings)
+                .await
+                .map_err(|e| e.to_string())?;
+            log::info!("sync_pull: imported settings");
+            imported += 1;
+        }
+        Ok(None) => log::info!("sync_pull: no settings.json on the remote yet"),
+        Err(e) => {
+            log::warn!("sync_pull: {e}");
+            problems.push(e);
+        }
+    }
+
+    match (imported, problems.is_empty()) {
+        (0, true) => {
+            log::info!("sync_pull: the remote has nothing to import yet");
+            Ok("Nothing to pull: the remote has no synced files yet".into())
+        }
+        (0, false) => Err(format!("Pull failed: {}", problems.join("; "))),
+        (_, true) => {
+            log::info!("sync_pull: completed");
+            Ok("Pull completed".into())
+        }
+        (_, false) => Ok(format!(
+            "Pull completed with problems: {}",
+            problems.join("; ")
+        )),
+    }
 }
 
 #[tauri::command]

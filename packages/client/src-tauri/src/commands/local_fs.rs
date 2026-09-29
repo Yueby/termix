@@ -181,33 +181,71 @@ pub async fn local_rename(old_path: String, new_path: String) -> Result<(), Stri
 
 #[tauri::command]
 pub async fn local_copy(src: String, dest: String, is_dir: bool) -> Result<(), String> {
-    let _ = safe_canonical(&src)?;
-    if let Some(dest_parent) = std::path::Path::new(&dest).parent() {
-        if dest_parent.exists() {
-            let _ = safe_canonical(&dest_parent.to_string_lossy())?;
-        }
+    let src_resolved = safe_canonical(&src)?;
+    let dest_resolved = resolve_for_comparison(&dest).await?;
+
+    if is_dir && dest_resolved.starts_with(&src_resolved) {
+        // A directory copy creates its destination before it enumerates the source, so a
+        // destination inside the source turns up in its own listing and gets copied into
+        // itself, over and over, until something runs out. Refuse instead.
+        return Err(format!(
+            "Cannot copy {} into itself: {} is inside it",
+            src, dest
+        ));
     }
+
     if is_dir {
-        copy_dir_iterative(&src, &dest)
+        copy_dir_iterative(&src_resolved, &dest_resolved)
             .await
             .map_err(|e| format!("Failed to copy directory {} to {}: {}", src, dest, e))
     } else {
-        if let Some(parent) = std::path::Path::new(&dest).parent() {
+        if let Some(parent) = dest_resolved.parent() {
             tokio::fs::create_dir_all(parent).await.ok();
         }
-        tokio::fs::copy(&src, &dest)
+        tokio::fs::copy(&src_resolved, &dest_resolved)
             .await
             .map(|_| ())
             .map_err(|e| format!("Failed to copy {} to {}: {}", src, dest, e))
     }
 }
 
+/// Canonicalises the deepest ancestor of `path` that exists and appends the rest.
+///
+/// A copy destination usually does not exist yet, so it cannot be canonicalised directly
+/// — but comparing it against the resolved source is exactly what stops a directory copy
+/// from recursing into its own output. Climbing to the nearest existing ancestor gives a
+/// real path without requiring the destination to be there.
+async fn resolve_for_comparison(path: &str) -> Result<std::path::PathBuf, String> {
+    let mut current = std::path::PathBuf::from(path);
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+
+    loop {
+        if let Ok(resolved) = tokio::fs::canonicalize(&current).await {
+            let mut full = resolved;
+            for part in tail.iter().rev() {
+                full.push(part);
+            }
+            return Ok(full);
+        }
+
+        match current.file_name().map(|name| name.to_os_string()) {
+            Some(name) if current.pop() => tail.push(name),
+            _ => return Err(format!("Invalid path '{}'", path)),
+        }
+    }
+}
+
 /// Iterative directory copy to avoid stack overflow on deep hierarchies.
-async fn copy_dir_iterative(src: &str, dest: &str) -> Result<(), std::io::Error> {
-    let mut stack: Vec<(std::path::PathBuf, std::path::PathBuf)> = vec![(
-        std::path::PathBuf::from(src),
-        std::path::PathBuf::from(dest),
-    )];
+///
+/// Symlinks are recreated rather than followed. Following them would let a link point
+/// back up the tree and make the walk unbounded, and copying a link's target would move
+/// data the user did not ask to move.
+async fn copy_dir_iterative(
+    src: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<(), std::io::Error> {
+    let mut stack: Vec<(std::path::PathBuf, std::path::PathBuf)> =
+        vec![(src.to_path_buf(), dest.to_path_buf())];
 
     while let Some((src_dir, dest_dir)) = stack.pop() {
         tokio::fs::create_dir_all(&dest_dir).await?;
@@ -215,7 +253,12 @@ async fn copy_dir_iterative(src: &str, dest: &str) -> Result<(), std::io::Error>
         while let Some(entry) = read_dir.next_entry().await? {
             let src_child = entry.path();
             let dest_child = dest_dir.join(entry.file_name());
-            if entry.metadata().await?.is_dir() {
+            // `file_type` does not follow the link; `metadata` does.
+            let file_type = entry.file_type().await?;
+            if file_type.is_symlink() {
+                let target = tokio::fs::read_link(&src_child).await?;
+                copy_symlink(&target, &src_child, &dest_child).await?;
+            } else if file_type.is_dir() {
                 stack.push((src_child, dest_child));
             } else {
                 tokio::fs::copy(&src_child, &dest_child).await?;
@@ -223,6 +266,37 @@ async fn copy_dir_iterative(src: &str, dest: &str) -> Result<(), std::io::Error>
         }
     }
     Ok(())
+}
+
+#[cfg(unix)]
+async fn copy_symlink(
+    target: &std::path::Path,
+    _source: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<(), std::io::Error> {
+    let _ = tokio::fs::remove_file(dest).await;
+    tokio::fs::symlink(target, dest).await
+}
+
+#[cfg(windows)]
+async fn copy_symlink(
+    target: &std::path::Path,
+    source: &std::path::Path,
+    dest: &std::path::Path,
+) -> Result<(), std::io::Error> {
+    // Windows keeps file and directory links apart, so the link has to be asked what it
+    // points at — the link itself is neither.
+    let _ = tokio::fs::remove_file(dest).await;
+    let _ = tokio::fs::remove_dir(dest).await;
+    let is_dir = tokio::fs::metadata(source)
+        .await
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
+    if is_dir {
+        tokio::fs::symlink_dir(target, dest).await
+    } else {
+        tokio::fs::symlink_file(target, dest).await
+    }
 }
 
 #[tauri::command]
@@ -285,4 +359,78 @@ pub async fn local_open_with(program: String, file_path: String) -> Result<(), S
             );
             format!("Failed to open {} with {}: {}", file_path, program, e)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("termix-local-fs-{name}"));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        dir
+    }
+
+    #[tokio::test]
+    async fn refuses_to_copy_a_directory_into_itself() {
+        let root = scratch("self-copy");
+        let source = root.join("source");
+        std::fs::create_dir_all(source.join("nested")).expect("source tree");
+        std::fs::write(source.join("nested").join("file.txt"), b"hello").expect("file");
+
+        // A directory copy creates its destination before it enumerates the source, so
+        // without the guard the destination appears in its own listing and the walk keeps
+        // copying its own output until something runs out.
+        let into_child = local_copy(
+            source.to_string_lossy().into_owned(),
+            source.join("inner").to_string_lossy().into_owned(),
+            true,
+        )
+        .await
+        .expect_err("a directory copied into itself has to be refused");
+        assert!(into_child.contains("into itself"), "{into_child}");
+
+        let onto_self = local_copy(
+            source.to_string_lossy().into_owned(),
+            source.to_string_lossy().into_owned(),
+            true,
+        )
+        .await
+        .expect_err("a directory copied onto itself has to be refused");
+        assert!(onto_self.contains("into itself"), "{onto_self}");
+
+        assert!(
+            !source.join("inner").exists(),
+            "the refused copy must not have created anything first"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[tokio::test]
+    async fn still_copies_a_directory_next_to_itself() {
+        // The other half of the guard: it has to refuse recursion without refusing the
+        // ordinary case, or it just breaks copying.
+        let root = scratch("sibling-copy");
+        let source = root.join("source");
+        std::fs::create_dir_all(source.join("nested")).expect("source tree");
+        std::fs::write(source.join("nested").join("file.txt"), b"hello").expect("file");
+
+        local_copy(
+            source.to_string_lossy().into_owned(),
+            root.join("target").to_string_lossy().into_owned(),
+            true,
+        )
+        .await
+        .expect("a sibling copy is ordinary and must succeed");
+
+        assert_eq!(
+            std::fs::read_to_string(root.join("target").join("nested").join("file.txt"))
+                .expect("copied file"),
+            "hello"
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
