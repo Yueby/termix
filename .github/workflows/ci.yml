@@ -61,6 +61,11 @@ jobs:
       # therefore runs tsc twice, once per target, and both must pass.
       - run: pnpm --filter @termix/server typecheck
 
+      # Reachable only at runtime: the middleware-ordering defect, the token-audience
+      # defect and the concurrent-push defect all typechecked cleanly. A typecheck cannot
+      # tell you that a handler ran with an empty context.
+      - run: pnpm --filter @termix/server test
+
   rust:
     name: Rust (check + test)
     runs-on: ubuntu-latest
@@ -106,13 +111,13 @@ jobs:
 
       - run: cargo fmt --manifest-path packages/client/src-tauri/Cargo.toml -- --check
 
-  # Advisory: the remaining warnings are design-level — argument counts on signatures
-  # shaped by the IPC contract, and one wide tuple type — not defects. They report so
-  # the debt stays visible without blocking a fix.
+  # Clippy is clean, so it gates. The few lints that cannot be satisfied — argument counts
+  # on signatures the IPC contract fixes, and one handler whose signature russh imposes —
+  # carry a targeted allow with its reason written down, rather than the job being told to
+  # ignore itself.
   rust-clippy:
-    name: Rust clippy (advisory)
+    name: Rust (clippy)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
