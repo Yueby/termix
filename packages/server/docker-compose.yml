@@ -1,6 +1,11 @@
 services:
   termix-server:
-    build: .
+    build:
+      # The lockfile and the workspace manifest are at the repository root, and pnpm needs
+      # both to resolve the workspace. A packages/server-only context cannot provide them,
+      # which is why the image never built.
+      context: ../..
+      dockerfile: packages/server/Dockerfile
     ports:
       - "3000:3000"
     volumes:

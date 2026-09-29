@@ -1,30 +1,32 @@
+# The build context is the repository root, not packages/server: the lockfile and the
+# workspace manifest live there, and pnpm resolves the workspace importers from them.
+# docker-compose.yml sets that context.
 FROM node:22-slim AS base
 RUN corepack enable pnpm
-
-FROM base AS deps
 WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile --prod
 
 FROM base AS build
-WORKDIR /app
-COPY package.json pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
-COPY . .
-RUN pnpm build
+# Manifests first, so the dependency install is cached independently of the source.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/server/package.json packages/server/
+RUN pnpm install --frozen-lockfile --filter @termix/server...
+COPY packages/server packages/server
+RUN pnpm --filter @termix/server build
 
-FROM base
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json ./
+FROM base AS runtime
+ENV NODE_ENV=production
+# Installing production dependencies into the same workspace layout, rather than copying
+# node_modules out of the build stage, keeps pnpm's symlinks pointing at things that exist.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/server/package.json packages/server/
+RUN pnpm install --frozen-lockfile --prod --filter @termix/server...
+COPY --from=build /app/packages/server/dist packages/server/dist
 
 RUN mkdir -p /app/data
-
 ENV DB_PATH=/app/data/termix.db
 ENV PORT=3000
-
 EXPOSE 3000
 VOLUME ["/app/data"]
 
+WORKDIR /app/packages/server
 CMD ["node", "dist/server.js"]

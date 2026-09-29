@@ -304,7 +304,7 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        self.touch_sync("snippets", &snippet.id).await?;
+        self.touch_sync_best_effort("snippets", &snippet.id).await;
         Ok(())
     }
 
@@ -431,7 +431,7 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        self.touch_sync("connections", &conn.id).await?;
+        self.touch_sync_best_effort("connections", &conn.id).await;
         Ok(())
     }
 
@@ -495,7 +495,7 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        self.touch_sync("keychain", &item.id).await?;
+        self.touch_sync_best_effort("keychain", &item.id).await;
         Ok(())
     }
 
@@ -519,9 +519,16 @@ impl Database {
 
     // ── Sync metadata ──
 
-    async fn touch_sync(&self, table: &str, record_id: &str) -> Result<()> {
+    /// Records that a row changed, for incremental-sync bookkeeping.
+    ///
+    /// Best effort on purpose. By the time this runs the caller's row is already
+    /// committed, so propagating a failure would report a save that did happen as a
+    /// failure — the two statements would have to be one transaction to be all-or-nothing.
+    /// Current sync pushes full snapshots and never reads this table; anyone building
+    /// incremental sync on top of it has to make that change first.
+    async fn touch_sync_best_effort(&self, table: &str, record_id: &str) {
         let now = now_epoch();
-        sqlx::query(
+        let result = sqlx::query(
             "INSERT OR REPLACE INTO sync_metadata (table_name, record_id, updated_at, synced_at)
              VALUES (?, ?, ?, 0)",
         )
@@ -529,8 +536,10 @@ impl Database {
         .bind(record_id)
         .bind(now)
         .execute(&self.pool)
-        .await?;
-        Ok(())
+        .await;
+        if let Err(error) = result {
+            log::warn!("Could not record sync metadata for {table}/{record_id}: {error}");
+        }
     }
 
     #[allow(dead_code)]

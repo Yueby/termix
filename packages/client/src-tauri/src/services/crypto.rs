@@ -49,6 +49,13 @@ fn get_or_create_key() -> Result<[u8; 32]> {
     let path = key_file_path()?;
 
     let key = if path.exists() {
+        #[cfg(unix)]
+        {
+            // Repair the mode of a key file written before it was set explicitly. The key is
+            // the only thing standing between the database and every credential in it.
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
         let encoded = std::fs::read_to_string(&path).context("Failed to read key file")?;
         let bytes = BASE64
             .decode(encoded.trim())
@@ -66,7 +73,7 @@ fn get_or_create_key() -> Result<[u8; 32]> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).context("Failed to create key file directory")?;
         }
-        std::fs::write(&path, &encoded).context("Failed to write key file")?;
+        write_key_file(&path, &encoded)?;
         log::info!(
             "New random encryption key generated and stored at {:?}",
             path
@@ -76,6 +83,36 @@ fn get_or_create_key() -> Result<[u8; 32]> {
 
     *cached = Some(key);
     Ok(key)
+}
+
+/// Writes the encryption key, private to the owning user where the platform allows it.
+///
+/// This file is the only thing protecting every stored password and private key, and it
+/// sits beside the database in the application-data directory. Inherited permissions are
+/// often wider than that deserves. On Windows the containing directory's ACL applies, which
+/// in a per-user profile is already restricted to that user.
+///
+/// Keeping the key in the platform credential store instead of an ordinary neighbouring
+/// file is the real fix, and a separate change: it needs a migration for existing installs.
+fn write_key_file(path: &std::path::Path, contents: &str) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)
+            .context("Failed to open the key file")?;
+        file.write_all(contents.as_bytes())
+            .context("Failed to write key file")
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(path, contents).context("Failed to write key file")
+    }
 }
 
 fn cipher() -> Result<Aes256Gcm> {
