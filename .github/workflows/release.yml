@@ -65,7 +65,7 @@ jobs:
           check "tauri.conf.json"     "$(node -p "require('./packages/client/src-tauri/tauri.conf.json').version")"
           check "client package.json" "$(node -p "require('./packages/client/package.json').version")"
           check "server package.json" "$(node -p "require('./packages/server/package.json').version")"
-          check "Cargo.toml"          "$(grep -m1 '^version = ' packages/client/src-tauri/Cargo.toml | cut -d'\"' -f2)"
+          check "Cargo.toml"          "$(awk -F'"' '/^version = /{print $2; exit}' packages/client/src-tauri/Cargo.toml)"
 
           exit "$fail"
 
