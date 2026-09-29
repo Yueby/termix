@@ -30,7 +30,10 @@ impl WebDavClient {
     pub async fn propfind(&self, path: &str) -> Result<String> {
         let resp = self
             .client
-            .request(reqwest::Method::from_bytes(b"PROPFIND").expect("PROPFIND is a valid HTTP method"), self.url(path))
+            .request(
+                reqwest::Method::from_bytes(b"PROPFIND").expect("PROPFIND is a valid HTTP method"),
+                self.url(path),
+            )
             .basic_auth(&self.username, Some(&self.password))
             .header("Depth", "1")
             .send()
@@ -82,7 +85,10 @@ impl WebDavClient {
     pub async fn mkcol(&self, path: &str) -> Result<()> {
         let resp = self
             .client
-            .request(reqwest::Method::from_bytes(b"MKCOL").expect("MKCOL is a valid HTTP method"), self.url(path))
+            .request(
+                reqwest::Method::from_bytes(b"MKCOL").expect("MKCOL is a valid HTTP method"),
+                self.url(path),
+            )
             .basic_auth(&self.username, Some(&self.password))
             .send()
             .await

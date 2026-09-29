@@ -121,27 +121,52 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_password TEXT DEFAULT ''")
-            .execute(&self.pool).await;
-        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_path TEXT DEFAULT ''")
-            .execute(&self.pool).await;
-        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_passphrase TEXT DEFAULT ''")
-            .execute(&self.pool).await;
+        let _ =
+            sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_password TEXT DEFAULT ''")
+                .execute(&self.pool)
+                .await;
+        let _ =
+            sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_key_path TEXT DEFAULT ''")
+                .execute(&self.pool)
+                .await;
+        let _ = sqlx::query(
+            "ALTER TABLE connections ADD COLUMN encrypted_key_passphrase TEXT DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
         let _ = sqlx::query("ALTER TABLE connections ADD COLUMN keychain_id TEXT DEFAULT ''")
-            .execute(&self.pool).await;
-        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN proxy_choice TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool).await;
-        let _ = sqlx::query("ALTER TABLE connections ADD COLUMN encrypted_proxy_password TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool).await;
+            .execute(&self.pool)
+            .await;
+        let _ =
+            sqlx::query("ALTER TABLE connections ADD COLUMN proxy_choice TEXT NOT NULL DEFAULT ''")
+                .execute(&self.pool)
+                .await;
+        let _ = sqlx::query(
+            "ALTER TABLE connections ADD COLUMN encrypted_proxy_password TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
 
-        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_private_key TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool).await;
-        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_public_key TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool).await;
-        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_certificate TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool).await;
-        let _ = sqlx::query("ALTER TABLE keychain ADD COLUMN encrypted_passphrase TEXT NOT NULL DEFAULT ''")
-            .execute(&self.pool).await;
+        let _ = sqlx::query(
+            "ALTER TABLE keychain ADD COLUMN encrypted_private_key TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE keychain ADD COLUMN encrypted_public_key TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE keychain ADD COLUMN encrypted_certificate TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
+        let _ = sqlx::query(
+            "ALTER TABLE keychain ADD COLUMN encrypted_passphrase TEXT NOT NULL DEFAULT ''",
+        )
+        .execute(&self.pool)
+        .await;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS terminal_logs (
@@ -165,11 +190,10 @@ impl Database {
     // ── Settings ──
 
     pub async fn get_settings(&self) -> Result<AppSettings> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT value FROM settings WHERE key = 'app_settings'",
-        )
-        .fetch_optional(&self.pool)
-        .await?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT value FROM settings WHERE key = 'app_settings'")
+                .fetch_optional(&self.pool)
+                .await?;
 
         match row {
             Some((json,)) => Ok(serde_json::from_str(&json)?),
@@ -179,23 +203,20 @@ impl Database {
 
     pub async fn save_settings(&self, settings: &AppSettings) -> Result<()> {
         let json = serde_json::to_string(settings)?;
-        sqlx::query(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES ('app_settings', ?)",
-        )
-        .bind(&json)
-        .execute(&self.pool)
-        .await?;
+        sqlx::query("INSERT OR REPLACE INTO settings (key, value) VALUES ('app_settings', ?)")
+            .bind(&json)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
     // ── Snippets ──
 
     pub async fn get_snippets(&self) -> Result<Vec<Snippet>> {
-        let rows: Vec<(String, String, String, String)> = sqlx::query_as(
-            "SELECT id, name, content, tags FROM snippets ORDER BY name",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let rows: Vec<(String, String, String, String)> =
+            sqlx::query_as("SELECT id, name, content, tags FROM snippets ORDER BY name")
+                .fetch_all(&self.pool)
+                .await?;
 
         let snippets = rows
             .into_iter()
@@ -204,7 +225,12 @@ impl Database {
                     log::warn!("Failed to parse tags JSON for snippet {}: {}", id, e);
                     Vec::new()
                 });
-                Snippet { id, name, content, tags }
+                Snippet {
+                    id,
+                    name,
+                    content,
+                    tags,
+                }
             })
             .collect();
 
@@ -252,20 +278,48 @@ impl Database {
     // ── Connections ──
 
     pub async fn get_connections(&self) -> Result<Vec<ConnectionInfo>> {
-        let rows: Vec<(String, String, String, i32, String, String, String, String, String, String, String, String, String)> =
-            sqlx::query_as(
-                "SELECT id, name, host, port, username, auth_type, group_name,
+        let rows: Vec<(
+            String,
+            String,
+            String,
+            i32,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+            String,
+        )> = sqlx::query_as(
+            "SELECT id, name, host, port, username, auth_type, group_name,
                         encrypted_password, encrypted_key_path, encrypted_key_passphrase,
                         COALESCE(keychain_id, '') as keychain_id,
                         COALESCE(proxy_choice, '') as proxy_choice,
                         COALESCE(encrypted_proxy_password, '') as encrypted_proxy_password
                  FROM connections ORDER BY name",
-            )
-            .fetch_all(&self.pool)
-            .await?;
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
         let mut conns = Vec::with_capacity(rows.len());
-        for (id, name, host, port, username, auth_type, group, enc_pw, enc_kp, enc_kpp, keychain_id, proxy_choice, enc_proxy_pw) in rows {
+        for (
+            id,
+            name,
+            host,
+            port,
+            username,
+            auth_type,
+            group,
+            enc_pw,
+            enc_kp,
+            enc_kpp,
+            keychain_id,
+            proxy_choice,
+            enc_proxy_pw,
+        ) in rows
+        {
             let password = crypto::decrypt(&enc_pw).unwrap_or_else(|e| {
                 log::warn!("Failed to decrypt password for connection {}: {}", id, e);
                 String::new()
@@ -275,7 +329,11 @@ impl Database {
                 String::new()
             });
             let key_passphrase = crypto::decrypt(&enc_kpp).unwrap_or_else(|e| {
-                log::warn!("Failed to decrypt key_passphrase for connection {}: {}", id, e);
+                log::warn!(
+                    "Failed to decrypt key_passphrase for connection {}: {}",
+                    id,
+                    e
+                );
                 String::new()
             });
             // The proxy password is stored apart from the mode so it can be encrypted.
@@ -286,7 +344,11 @@ impl Database {
             };
             if let Some(ProxyMode::Custom(config)) = proxy.as_mut() {
                 config.password = crypto::decrypt(&enc_proxy_pw).unwrap_or_else(|e| {
-                    log::warn!("Failed to decrypt proxy password for connection {}: {}", id, e);
+                    log::warn!(
+                        "Failed to decrypt proxy password for connection {}: {}",
+                        id,
+                        e
+                    );
                     String::new()
                 });
             }
@@ -483,7 +545,9 @@ impl Database {
 
     // ── Terminal Logs ──
 
-    pub async fn get_terminal_logs(&self) -> Result<Vec<crate::commands::terminal_log::TerminalLogEntry>> {
+    pub async fn get_terminal_logs(
+        &self,
+    ) -> Result<Vec<crate::commands::terminal_log::TerminalLogEntry>> {
         let rows: Vec<(String, String, String, String, String, String, i64, i64)> = sqlx::query_as(
             "SELECT id, connection_id, connection_name, host, username, session_type, started_at, ended_at
              FROM terminal_logs ORDER BY ended_at DESC",
@@ -491,22 +555,47 @@ impl Database {
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(|(id, connection_id, connection_name, host, username, session_type, started_at, ended_at)| {
-            crate::commands::terminal_log::TerminalLogEntry { id, connection_id, connection_name, host, username, session_type, started_at, ended_at }
-        }).collect())
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    id,
+                    connection_id,
+                    connection_name,
+                    host,
+                    username,
+                    session_type,
+                    started_at,
+                    ended_at,
+                )| {
+                    crate::commands::terminal_log::TerminalLogEntry {
+                        id,
+                        connection_id,
+                        connection_name,
+                        host,
+                        username,
+                        session_type,
+                        started_at,
+                        ended_at,
+                    }
+                },
+            )
+            .collect())
     }
 
     pub async fn get_terminal_log_content(&self, id: &str) -> Result<Option<String>> {
-        let row: Option<(String,)> = sqlx::query_as(
-            "SELECT content FROM terminal_logs WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row: Option<(String,)> =
+            sqlx::query_as("SELECT content FROM terminal_logs WHERE id = ?")
+                .bind(id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.map(|(c,)| c))
     }
 
-    pub async fn save_terminal_log(&self, log: &crate::commands::terminal_log::SaveTerminalLog) -> Result<()> {
+    pub async fn save_terminal_log(
+        &self,
+        log: &crate::commands::terminal_log::SaveTerminalLog,
+    ) -> Result<()> {
         sqlx::query(
             "INSERT INTO terminal_logs (id, connection_id, connection_name, host, username, session_type, started_at, ended_at, content)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

@@ -71,8 +71,10 @@ pub async fn save_settings(
     mut settings: AppSettings,
     db: State<'_, Database>,
 ) -> Result<(), String> {
-    settings.webdav_password = crypto::encrypt(&settings.webdav_password).map_err(|e| e.to_string())?;
-    settings.sync_encryption_password = crypto::encrypt(&settings.sync_encryption_password).map_err(|e| e.to_string())?;
+    settings.webdav_password =
+        crypto::encrypt(&settings.webdav_password).map_err(|e| e.to_string())?;
+    settings.sync_encryption_password =
+        crypto::encrypt(&settings.sync_encryption_password).map_err(|e| e.to_string())?;
     if let ProxyMode::Custom(config) = &mut settings.proxy {
         config.password = crypto::encrypt(&config.password).map_err(|e| e.to_string())?;
     }

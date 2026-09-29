@@ -1,10 +1,10 @@
-pub mod ssh;
-pub mod sftp;
-pub mod local_fs;
-pub mod local_terminal;
 pub mod connection;
 pub mod keychain;
+pub mod local_fs;
+pub mod local_terminal;
 pub mod settings;
+pub mod sftp;
 pub mod snippet;
+pub mod ssh;
 pub mod sync;
 pub mod terminal_log;

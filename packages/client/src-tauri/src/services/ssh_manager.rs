@@ -160,7 +160,10 @@ impl SshManager {
             } => {
                 let key = russh::keys::load_secret_key(&key_path, passphrase.as_deref())?;
                 handle
-                    .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
+                    .authenticate_publickey(
+                        username,
+                        PrivateKeyWithHashAlg::new(Arc::new(key), None),
+                    )
                     .await?
             }
             AuthMethod::PrivateKeyContent {
@@ -172,14 +175,22 @@ impl SshManager {
                 }
                 let key = russh::keys::decode_secret_key(&key_content, passphrase.as_deref())?;
                 handle
-                    .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
+                    .authenticate_publickey(
+                        username,
+                        PrivateKeyWithHashAlg::new(Arc::new(key), None),
+                    )
                     .await?
             }
         };
 
         // 0.63 returns an AuthResult instead of a bool.
         if !authenticated.success() {
-            log::warn!("SSH authentication failed for {}@{}:{}", username, host, port);
+            log::warn!(
+                "SSH authentication failed for {}@{}:{}",
+                username,
+                host,
+                port
+            );
             return Err(anyhow!("Authentication failed"));
         }
 
@@ -190,7 +201,10 @@ impl SshManager {
             .await?;
         channel.request_shell(false).await?;
 
-        let session = Session { handle, channel: Arc::new(channel) };
+        let session = Session {
+            handle,
+            channel: Arc::new(channel),
+        };
         self.sessions
             .lock()
             .await
@@ -256,7 +270,7 @@ impl SshManager {
                 .ok_or_else(|| anyhow!("Session not found: {}", session_id))?
         };
         channel
-            .data(&data[..])
+            .data(data)
             .await
             .map_err(|e| anyhow!("Failed to write: {:?}", e))?;
         Ok(())

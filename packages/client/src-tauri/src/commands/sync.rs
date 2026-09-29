@@ -1,7 +1,7 @@
 use tauri::State;
 
-use crate::services::db::Database;
 use crate::services::crypto;
+use crate::services::db::Database;
 use crate::services::webdav::WebDavClient;
 
 fn normalize_remote_dir(dir: &str) -> String {
@@ -31,9 +31,8 @@ fn sync_decrypt(encoded: &str, sync_pw: &str) -> Result<String, String> {
     if sync_pw.is_empty() {
         Ok(encoded.to_string())
     } else {
-        crypto::decrypt_with_password(encoded, sync_pw).map_err(|e| {
-            format!("Sync decryption failed (wrong password?): {}", e)
-        })
+        crypto::decrypt_with_password(encoded, sync_pw)
+            .map_err(|e| format!("Sync decryption failed (wrong password?): {}", e))
     }
 }
 
@@ -49,15 +48,14 @@ pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
         String::new()
     });
     let sync_pw = crypto::decrypt(&settings.sync_encryption_password).unwrap_or_else(|e| {
-        log::warn!("sync_push: failed to decrypt sync_encryption_password: {}", e);
+        log::warn!(
+            "sync_push: failed to decrypt sync_encryption_password: {}",
+            e
+        );
         String::new()
     });
 
-    let client = WebDavClient::new(
-        &settings.webdav_url,
-        &settings.webdav_username,
-        &webdav_pw,
-    );
+    let client = WebDavClient::new(&settings.webdav_url, &settings.webdav_username, &webdav_pw);
 
     let remote_dir = normalize_remote_dir(&settings.webdav_remote_dir);
 
@@ -105,7 +103,10 @@ pub async fn sync_push(db: State<'_, Database>) -> Result<String, String> {
             log::error!("sync_push: failed to upload keychain: {}", e);
             e.to_string()
         })?;
-    log::info!("sync_push: uploaded {} keychain items", keychain_items.len());
+    log::info!(
+        "sync_push: uploaded {} keychain items",
+        keychain_items.len()
+    );
 
     let mut sync_settings = settings.clone();
     sync_settings.webdav_url = String::new();
@@ -138,20 +139,25 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
         String::new()
     });
     let sync_pw = crypto::decrypt(&settings.sync_encryption_password).unwrap_or_else(|e| {
-        log::warn!("sync_pull: failed to decrypt sync_encryption_password: {}", e);
+        log::warn!(
+            "sync_pull: failed to decrypt sync_encryption_password: {}",
+            e
+        );
         String::new()
     });
 
-    let client = WebDavClient::new(
-        &settings.webdav_url,
-        &settings.webdav_username,
-        &webdav_pw,
-    );
+    let client = WebDavClient::new(&settings.webdav_url, &settings.webdav_username, &webdav_pw);
 
     let remote_dir = normalize_remote_dir(&settings.webdav_remote_dir);
 
-    match client.get(&format!("{}/connections.json", remote_dir)).await {
-        Ok(conn_json) => match serde_json::from_str::<Vec<crate::commands::connection::ConnectionInfo>>(&conn_json) {
+    match client
+        .get(&format!("{}/connections.json", remote_dir))
+        .await
+    {
+        Ok(conn_json) => match serde_json::from_str::<
+            Vec<crate::commands::connection::ConnectionInfo>,
+        >(&conn_json)
+        {
             Ok(mut remote_conns) => {
                 for conn in remote_conns.iter_mut() {
                     conn.password = sync_decrypt(&conn.password, &sync_pw)?;
@@ -170,21 +176,26 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
     }
 
     match client.get(&format!("{}/snippets.json", remote_dir)).await {
-        Ok(snip_json) => match serde_json::from_str::<Vec<crate::commands::snippet::Snippet>>(&snip_json) {
-            Ok(remote_snips) => {
-                let count = remote_snips.len();
-                for snip in remote_snips {
-                    db.save_snippet(&snip).await.map_err(|e| e.to_string())?;
+        Ok(snip_json) => {
+            match serde_json::from_str::<Vec<crate::commands::snippet::Snippet>>(&snip_json) {
+                Ok(remote_snips) => {
+                    let count = remote_snips.len();
+                    for snip in remote_snips {
+                        db.save_snippet(&snip).await.map_err(|e| e.to_string())?;
+                    }
+                    log::info!("sync_pull: imported {} snippets", count);
                 }
-                log::info!("sync_pull: imported {} snippets", count);
+                Err(e) => log::warn!("sync_pull: failed to parse snippets.json: {}", e),
             }
-            Err(e) => log::warn!("sync_pull: failed to parse snippets.json: {}", e),
-        },
+        }
         Err(e) => log::warn!("sync_pull: failed to fetch snippets.json: {}", e),
     }
 
     match client.get(&format!("{}/keychain.json", remote_dir)).await {
-        Ok(keychain_json) => match serde_json::from_str::<Vec<crate::commands::keychain::KeychainItem>>(&keychain_json) {
+        Ok(keychain_json) => match serde_json::from_str::<
+            Vec<crate::commands::keychain::KeychainItem>,
+        >(&keychain_json)
+        {
             Ok(mut remote_items) => {
                 for item in remote_items.iter_mut() {
                     item.private_key = sync_decrypt(&item.private_key, &sync_pw)?;
@@ -194,7 +205,9 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
                 }
                 let count = remote_items.len();
                 for item in remote_items {
-                    db.save_keychain_item(&item).await.map_err(|e| e.to_string())?;
+                    db.save_keychain_item(&item)
+                        .await
+                        .map_err(|e| e.to_string())?;
                 }
                 log::info!("sync_pull: imported {} keychain items", count);
             }
@@ -204,18 +217,23 @@ pub async fn sync_pull(db: State<'_, Database>) -> Result<String, String> {
     }
 
     match client.get(&format!("{}/settings.json", remote_dir)).await {
-        Ok(settings_json) => match serde_json::from_str::<crate::commands::settings::AppSettings>(&settings_json) {
-            Ok(mut remote_settings) => {
-                remote_settings.webdav_url = settings.webdav_url.clone();
-                remote_settings.webdav_username = settings.webdav_username.clone();
-                remote_settings.webdav_password = settings.webdav_password.clone();
-                remote_settings.webdav_remote_dir = settings.webdav_remote_dir.clone();
-                remote_settings.sync_encryption_password = settings.sync_encryption_password.clone();
-                db.save_settings(&remote_settings).await.map_err(|e| e.to_string())?;
-                log::info!("sync_pull: imported settings");
+        Ok(settings_json) => {
+            match serde_json::from_str::<crate::commands::settings::AppSettings>(&settings_json) {
+                Ok(mut remote_settings) => {
+                    remote_settings.webdav_url = settings.webdav_url.clone();
+                    remote_settings.webdav_username = settings.webdav_username.clone();
+                    remote_settings.webdav_password = settings.webdav_password.clone();
+                    remote_settings.webdav_remote_dir = settings.webdav_remote_dir.clone();
+                    remote_settings.sync_encryption_password =
+                        settings.sync_encryption_password.clone();
+                    db.save_settings(&remote_settings)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    log::info!("sync_pull: imported settings");
+                }
+                Err(e) => log::warn!("sync_pull: failed to parse settings.json: {}", e),
             }
-            Err(e) => log::warn!("sync_pull: failed to parse settings.json: {}", e),
-        },
+        }
         Err(e) => log::warn!("sync_pull: failed to fetch settings.json: {}", e),
     }
 
@@ -231,23 +249,19 @@ pub async fn sync_test_connection(db: State<'_, Database>) -> Result<String, Str
         return Err("WebDAV URL not configured".into());
     }
     let webdav_pw = crypto::decrypt(&settings.webdav_password).unwrap_or_else(|e| {
-        log::warn!("sync_test_connection: failed to decrypt webdav_password: {}", e);
+        log::warn!(
+            "sync_test_connection: failed to decrypt webdav_password: {}",
+            e
+        );
         String::new()
     });
 
-    let client = WebDavClient::new(
-        &settings.webdav_url,
-        &settings.webdav_username,
-        &webdav_pw,
-    );
+    let client = WebDavClient::new(&settings.webdav_url, &settings.webdav_username, &webdav_pw);
 
-    client
-        .propfind("/")
-        .await
-        .map_err(|e| {
-            log::warn!("sync_test_connection: failed: {}", e);
-            format!("Connection failed: {}", e)
-        })?;
+    client.propfind("/").await.map_err(|e| {
+        log::warn!("sync_test_connection: failed: {}", e);
+        format!("Connection failed: {}", e)
+    })?;
 
     log::info!("sync_test_connection: success");
     Ok("Connection successful".into())

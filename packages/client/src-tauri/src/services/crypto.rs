@@ -13,13 +13,15 @@ static CACHED_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
 
 fn key_file_path() -> Result<PathBuf> {
     let app_dir = dirs::data_dir()
-        .or_else(|| dirs::home_dir())
+        .or_else(dirs::home_dir)
         .ok_or_else(|| anyhow::anyhow!("Cannot determine app data directory"))?;
     Ok(app_dir.join("com.termix.app").join(KEY_FILE_NAME))
 }
 
 fn get_or_create_key() -> Result<[u8; 32]> {
-    let mut cached = CACHED_KEY.lock().map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
+    let mut cached = CACHED_KEY
+        .lock()
+        .map_err(|e| anyhow::anyhow!("Lock poisoned: {}", e))?;
     if let Some(key) = *cached {
         return Ok(key);
     }
@@ -28,7 +30,9 @@ fn get_or_create_key() -> Result<[u8; 32]> {
 
     let key = if path.exists() {
         let encoded = std::fs::read_to_string(&path).context("Failed to read key file")?;
-        let bytes = BASE64.decode(encoded.trim()).context("Failed to decode key from file")?;
+        let bytes = BASE64
+            .decode(encoded.trim())
+            .context("Failed to decode key from file")?;
         if bytes.len() != 32 {
             anyhow::bail!("Invalid encryption key length in key file");
         }
@@ -40,11 +44,13 @@ fn get_or_create_key() -> Result<[u8; 32]> {
         getrandom::fill(&mut k).map_err(|e| anyhow::anyhow!("system RNG unavailable: {e}"))?;
         let encoded = BASE64.encode(k);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create key file directory")?;
+            std::fs::create_dir_all(parent).context("Failed to create key file directory")?;
         }
         std::fs::write(&path, &encoded).context("Failed to write key file")?;
-        log::info!("New random encryption key generated and stored at {:?}", path);
+        log::info!(
+            "New random encryption key generated and stored at {:?}",
+            path
+        );
         k
     };
 
@@ -85,9 +91,7 @@ pub fn decrypt(encoded: &str) -> Result<String> {
     if encoded.is_empty() {
         return Ok(String::new());
     }
-    let combined = BASE64
-        .decode(encoded)
-        .context("base64 decode failed")?;
+    let combined = BASE64.decode(encoded).context("base64 decode failed")?;
 
     if combined.len() < 12 {
         anyhow::bail!("ciphertext too short");
@@ -135,9 +139,7 @@ pub fn decrypt_with_password(encoded: &str, password: &str) -> Result<String> {
     if encoded.is_empty() {
         return Ok(String::new());
     }
-    let combined = BASE64
-        .decode(encoded)
-        .context("base64 decode failed")?;
+    let combined = BASE64.decode(encoded).context("base64 decode failed")?;
 
     if combined.len() < 12 {
         anyhow::bail!("ciphertext too short");

@@ -188,7 +188,10 @@ fn parse_windows_proxy_server(server: &str) -> Option<ProxyConfig> {
 }
 
 fn parse_host_port(value: &str) -> Option<(String, u16)> {
-    let value = value.trim().trim_start_matches("http://").trim_start_matches("https://");
+    let value = value
+        .trim()
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
     let (host, port) = value.rsplit_once(':')?;
     let port: u16 = port.trim().parse().ok()?;
     if host.trim().is_empty() || port == 0 {
@@ -199,10 +202,17 @@ fn parse_host_port(value: &str) -> Option<(String, u16)> {
 
 #[cfg(not(windows))]
 fn env_system_proxy() -> Option<ProxyConfig> {
-    let value = ["ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"]
-        .iter()
-        .find_map(|name| std::env::var(name).ok())
-        .filter(|v| !v.trim().is_empty())?;
+    let value = [
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ]
+    .iter()
+    .find_map(|name| std::env::var(name).ok())
+    .filter(|v| !v.trim().is_empty())?;
 
     let kind = if value.starts_with("socks5://") || value.starts_with("socks://") {
         ProxyKind::Socks5
@@ -210,7 +220,13 @@ fn env_system_proxy() -> Option<ProxyConfig> {
         ProxyKind::Http
     };
     let (host, port) = parse_host_port(&value)?;
-    Some(ProxyConfig { kind, host, port, username: String::new(), password: String::new() })
+    Some(ProxyConfig {
+        kind,
+        host,
+        port,
+        username: String::new(),
+        password: String::new(),
+    })
 }
 
 /// True when the target appears in the system proxy's bypass list.
@@ -224,7 +240,11 @@ fn is_bypassed(target_host: &str) -> bool {
         return false;
     };
     let overrides: String = key.get_value("ProxyOverride").unwrap_or_default();
-    let entries: Vec<&str> = overrides.split(';').map(str::trim).filter(|e| !e.is_empty()).collect();
+    let entries: Vec<&str> = overrides
+        .split(';')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .collect();
     matches_bypass(&entries, target_host)
 }
 
@@ -233,7 +253,11 @@ fn is_bypassed(target_host: &str) -> bool {
     let overrides = std::env::var("NO_PROXY")
         .or_else(|_| std::env::var("no_proxy"))
         .unwrap_or_default();
-    let entries: Vec<&str> = overrides.split(',').map(str::trim).filter(|e| !e.is_empty()).collect();
+    let entries: Vec<&str> = overrides
+        .split(',')
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .collect();
     matches_bypass(&entries, target_host)
 }
 
@@ -254,9 +278,16 @@ fn matches_bypass(entries: &[&str], target_host: &str) -> bool {
             continue;
         }
 
-        let pattern = entry.split_once(':').map(|(h, p)| {
-            if p.chars().all(|c| c.is_ascii_digit()) { h } else { entry.as_str() }
-        }).unwrap_or(entry.as_str());
+        let pattern = entry
+            .split_once(':')
+            .map(|(h, p)| {
+                if p.chars().all(|c| c.is_ascii_digit()) {
+                    h
+                } else {
+                    entry.as_str()
+                }
+            })
+            .unwrap_or(entry.as_str());
 
         if pattern.starts_with('*') || pattern.ends_with('*') {
             let trimmed = pattern.trim_matches('*');
@@ -360,8 +391,7 @@ mod tests {
 
     #[test]
     fn prefers_socks_entry_over_http() {
-        let parsed =
-            parse_windows_proxy_server("http=10.0.0.1:3128;socks=127.0.0.1:1080").unwrap();
+        let parsed = parse_windows_proxy_server("http=10.0.0.1:3128;socks=127.0.0.1:1080").unwrap();
         assert_eq!(parsed.kind, ProxyKind::Socks5);
         assert_eq!(parsed.host, "127.0.0.1");
         assert_eq!(parsed.port, 1080);
@@ -411,7 +441,10 @@ mod tests {
 
             let mut buf = [0u8; 64];
             let read = tokio::time::timeout(Duration::from_secs(15), stream.read(&mut buf));
-            let n = read.await.expect("timed out waiting for the banner").expect("read failed");
+            let n = read
+                .await
+                .expect("timed out waiting for the banner")
+                .expect("read failed");
             String::from_utf8_lossy(&buf[..n]).into_owned()
         }
 

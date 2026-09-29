@@ -36,7 +36,12 @@ pub async fn sftp_connect(
         )
         .await
         .map_err(|e| {
-            log::error!("sftp_connect failed for {}:{}: {}", payload.host, payload.port, e);
+            log::error!(
+                "sftp_connect failed for {}:{}: {}",
+                payload.host,
+                payload.port,
+                e
+            );
             e.to_string()
         })?;
 
@@ -48,13 +53,10 @@ pub async fn sftp_disconnect(
     session_id: String,
     sftp_manager: State<'_, SftpManager>,
 ) -> Result<(), String> {
-    sftp_manager
-        .disconnect(&session_id)
-        .await
-        .map_err(|e| {
-            log::warn!("sftp_disconnect failed for session {}: {}", session_id, e);
-            e.to_string()
-        })
+    sftp_manager.disconnect(&session_id).await.map_err(|e| {
+        log::warn!("sftp_disconnect failed for session {}: {}", session_id, e);
+        e.to_string()
+    })
 }
 
 #[tauri::command]
@@ -78,7 +80,12 @@ pub async fn sftp_list_dir(
         .list_dir(&session_id, &path)
         .await
         .map_err(|e| {
-            log::warn!("sftp_list_dir failed: session={}, path={}: {}", session_id, path, e);
+            log::warn!(
+                "sftp_list_dir failed: session={}, path={}: {}",
+                session_id,
+                path,
+                e
+            );
             e.to_string()
         })
 }
@@ -94,7 +101,12 @@ pub async fn sftp_read_file(
         .download(&session_id, &remote_path, &local_path)
         .await
         .map_err(|e| {
-            log::error!("sftp_read_file failed: session={}, remote={}: {}", session_id, remote_path, e);
+            log::error!(
+                "sftp_read_file failed: session={}, remote={}: {}",
+                session_id,
+                remote_path,
+                e
+            );
             e.to_string()
         })
 }
@@ -110,7 +122,12 @@ pub async fn sftp_write_file(
         .upload(&session_id, &local_path, &remote_path)
         .await
         .map_err(|e| {
-            log::error!("sftp_write_file failed: session={}, local={}: {}", session_id, local_path, e);
+            log::error!(
+                "sftp_write_file failed: session={}, local={}: {}",
+                session_id,
+                local_path,
+                e
+            );
             e.to_string()
         })
 }

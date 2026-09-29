@@ -17,17 +17,11 @@ pub async fn get_snippets(db: State<'_, Database>) -> Result<Vec<Snippet>, Strin
 }
 
 #[tauri::command]
-pub async fn save_snippet(
-    snippet: Snippet,
-    db: State<'_, Database>,
-) -> Result<(), String> {
+pub async fn save_snippet(snippet: Snippet, db: State<'_, Database>) -> Result<(), String> {
     db.save_snippet(&snippet).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn delete_snippet(
-    id: String,
-    db: State<'_, Database>,
-) -> Result<(), String> {
+pub async fn delete_snippet(id: String, db: State<'_, Database>) -> Result<(), String> {
     db.delete_snippet(&id).await.map_err(|e| e.to_string())
 }

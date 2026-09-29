@@ -59,7 +59,7 @@ impl LocalTerminalManager {
             pixel_height: 0,
         })?;
 
-        let shell_path = shell.unwrap_or_else(|| auto_detect_best_shell());
+        let shell_path = shell.unwrap_or_else(auto_detect_best_shell);
         let mut cmd = CommandBuilder::new(&shell_path);
         if let Some(args) = shell_args {
             for arg in &args {
@@ -84,7 +84,11 @@ impl LocalTerminalManager {
             .await
             .insert(session_id.clone(), session);
 
-        log::info!("Local terminal spawned: session={}, shell={}", session_id, shell_path);
+        log::info!(
+            "Local terminal spawned: session={}, shell={}",
+            session_id,
+            shell_path
+        );
 
         let sid = session_id.clone();
         std::thread::spawn(move || {
@@ -163,7 +167,11 @@ impl LocalTerminalManager {
         let mut sessions = self.sessions.lock().await;
         if let Some(mut session) = sessions.remove(session_id) {
             if let Err(e) = session.child.kill() {
-                log::warn!("Failed to kill local terminal process {}: {}", session_id, e);
+                log::warn!(
+                    "Failed to kill local terminal process {}: {}",
+                    session_id,
+                    e
+                );
             }
         }
         Ok(())

@@ -36,12 +36,20 @@ pub async fn get_terminal_logs(db: State<'_, Database>) -> Result<Vec<TerminalLo
 }
 
 #[tauri::command]
-pub async fn get_terminal_log_content(db: State<'_, Database>, id: String) -> Result<Option<String>, String> {
-    db.get_terminal_log_content(&id).await.map_err(|e| e.to_string())
+pub async fn get_terminal_log_content(
+    db: State<'_, Database>,
+    id: String,
+) -> Result<Option<String>, String> {
+    db.get_terminal_log_content(&id)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn save_terminal_log(db: State<'_, Database>, log: SaveTerminalLog) -> Result<(), String> {
+pub async fn save_terminal_log(
+    db: State<'_, Database>,
+    log: SaveTerminalLog,
+) -> Result<(), String> {
     db.save_terminal_log(&log).await.map_err(|e| e.to_string())
 }
 

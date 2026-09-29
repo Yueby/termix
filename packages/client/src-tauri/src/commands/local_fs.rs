@@ -39,11 +39,7 @@ pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, String> {
         .await
         .map_err(|e| format!("Failed to read directory {}: {}", path, e))?;
 
-    while let Some(entry) = read_dir
-        .next_entry()
-        .await
-        .map_err(|e| e.to_string())?
-    {
+    while let Some(entry) = read_dir.next_entry().await.map_err(|e| e.to_string())? {
         let name = entry.file_name().to_string_lossy().to_string();
         let meta = match entry.metadata().await {
             Ok(m) => m,
@@ -77,7 +73,11 @@ pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, String> {
         });
     }
 
-    entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then(a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
     Ok(entries)
 }
 
@@ -116,20 +116,16 @@ pub async fn local_create_dir(path: String) -> Result<(), String> {
         if parent.exists() {
             let canonical_parent = safe_canonical(&parent.to_string_lossy())?;
             let final_path = canonical_parent.join(target.file_name().unwrap_or_default());
-            return tokio::fs::create_dir_all(&final_path)
-                .await
-                .map_err(|e| {
-                    log::warn!("local_create_dir failed: {}: {}", path, e);
-                    format!("Failed to create directory {}: {}", path, e)
-                });
+            return tokio::fs::create_dir_all(&final_path).await.map_err(|e| {
+                log::warn!("local_create_dir failed: {}: {}", path, e);
+                format!("Failed to create directory {}: {}", path, e)
+            });
         }
     }
-    tokio::fs::create_dir_all(&path)
-        .await
-        .map_err(|e| {
-            log::warn!("local_create_dir failed: {}: {}", path, e);
-            format!("Failed to create directory {}: {}", path, e)
-        })
+    tokio::fs::create_dir_all(&path).await.map_err(|e| {
+        log::warn!("local_create_dir failed: {}: {}", path, e);
+        format!("Failed to create directory {}: {}", path, e)
+    })
 }
 
 #[tauri::command]
@@ -137,19 +133,15 @@ pub async fn local_remove(path: String, is_dir: bool) -> Result<(), String> {
     log::info!("local_remove: path={}, is_dir={}", path, is_dir);
     let canonical = safe_canonical(&path)?;
     if is_dir {
-        tokio::fs::remove_dir_all(&canonical)
-            .await
-            .map_err(|e| {
-                log::warn!("local_remove failed: {}: {}", path, e);
-                format!("Failed to remove directory {}: {}", path, e)
-            })
+        tokio::fs::remove_dir_all(&canonical).await.map_err(|e| {
+            log::warn!("local_remove failed: {}: {}", path, e);
+            format!("Failed to remove directory {}: {}", path, e)
+        })
     } else {
-        tokio::fs::remove_file(&canonical)
-            .await
-            .map_err(|e| {
-                log::warn!("local_remove failed: {}: {}", path, e);
-                format!("Failed to remove file {}: {}", path, e)
-            })
+        tokio::fs::remove_file(&canonical).await.map_err(|e| {
+            log::warn!("local_remove failed: {}: {}", path, e);
+            format!("Failed to remove file {}: {}", path, e)
+        })
     }
 }
 
@@ -195,9 +187,10 @@ pub async fn local_copy(src: String, dest: String, is_dir: bool) -> Result<(), S
 
 /// Iterative directory copy to avoid stack overflow on deep hierarchies.
 async fn copy_dir_iterative(src: &str, dest: &str) -> Result<(), std::io::Error> {
-    let mut stack: Vec<(std::path::PathBuf, std::path::PathBuf)> = vec![
-        (std::path::PathBuf::from(src), std::path::PathBuf::from(dest)),
-    ];
+    let mut stack: Vec<(std::path::PathBuf, std::path::PathBuf)> = vec![(
+        std::path::PathBuf::from(src),
+        std::path::PathBuf::from(dest),
+    )];
 
     while let Some((src_dir, dest_dir)) = stack.pop() {
         tokio::fs::create_dir_all(&dest_dir).await?;
@@ -267,7 +260,12 @@ pub async fn local_open_with(program: String, file_path: String) -> Result<(), S
         .spawn()
         .map(|_| ())
         .map_err(|e| {
-            log::warn!("local_open_with failed: {} with {}: {}", file_path, program, e);
+            log::warn!(
+                "local_open_with failed: {} with {}: {}",
+                file_path,
+                program,
+                e
+            );
             format!("Failed to open {} with {}: {}", file_path, program, e)
         })
 }

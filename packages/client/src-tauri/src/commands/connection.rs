@@ -33,17 +33,11 @@ pub async fn get_connections(db: State<'_, Database>) -> Result<Vec<ConnectionIn
 }
 
 #[tauri::command]
-pub async fn save_connection(
-    conn: ConnectionInfo,
-    db: State<'_, Database>,
-) -> Result<(), String> {
+pub async fn save_connection(conn: ConnectionInfo, db: State<'_, Database>) -> Result<(), String> {
     db.save_connection(&conn).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn delete_connection(
-    id: String,
-    db: State<'_, Database>,
-) -> Result<(), String> {
+pub async fn delete_connection(id: String, db: State<'_, Database>) -> Result<(), String> {
     db.delete_connection(&id).await.map_err(|e| e.to_string())
 }

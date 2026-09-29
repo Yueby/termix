@@ -26,11 +26,10 @@ pub fn run() {
             std::fs::create_dir_all(&app_dir)?;
             let app_dir_str = app_dir.to_string_lossy().to_string();
 
-            let db = tauri::async_runtime::block_on(Database::new(&app_dir_str))
-                .map_err(|e| {
-                    log::error!("Failed to initialize database: {}", e);
-                    e.to_string()
-                })?;
+            let db = tauri::async_runtime::block_on(Database::new(&app_dir_str)).map_err(|e| {
+                log::error!("Failed to initialize database: {}", e);
+                e.to_string()
+            })?;
             app.manage(db);
             log::info!("Database initialized at {}", app_dir_str);
 

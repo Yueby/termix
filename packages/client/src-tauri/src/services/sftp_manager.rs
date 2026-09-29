@@ -98,7 +98,10 @@ impl SftpManager {
             } => {
                 let key = russh::keys::load_secret_key(&key_path, passphrase.as_deref())?;
                 handle
-                    .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
+                    .authenticate_publickey(
+                        username,
+                        PrivateKeyWithHashAlg::new(Arc::new(key), None),
+                    )
                     .await?
             }
             AuthMethod::PrivateKeyContent {
@@ -110,14 +113,22 @@ impl SftpManager {
                 }
                 let key = russh::keys::decode_secret_key(&key_content, passphrase.as_deref())?;
                 handle
-                    .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), None))
+                    .authenticate_publickey(
+                        username,
+                        PrivateKeyWithHashAlg::new(Arc::new(key), None),
+                    )
                     .await?
             }
         };
 
         // 0.63 returns an AuthResult instead of a bool.
         if !authenticated.success() {
-            log::warn!("SFTP authentication failed for {}@{}:{}", username, host, port);
+            log::warn!(
+                "SFTP authentication failed for {}@{}:{}",
+                username,
+                host,
+                port
+            );
             return Err(anyhow!("Authentication failed"));
         }
 
@@ -125,12 +136,14 @@ impl SftpManager {
         channel.request_subsystem(true, "sftp").await?;
 
         let stream = channel.into_stream();
-        let sftp = SftpSession::new(stream).await.map_err(|e| anyhow!("{}", e))?;
-
-        self.sessions
-            .lock()
+        let sftp = SftpSession::new(stream)
             .await
-            .insert(session_id.clone(), Arc::new(SftpSessionInfo { handle, sftp }));
+            .map_err(|e| anyhow!("{}", e))?;
+
+        self.sessions.lock().await.insert(
+            session_id.clone(),
+            Arc::new(SftpSessionInfo { handle, sftp }),
+        );
 
         log::info!("SFTP session {} connected to {}:{}", session_id, host, port);
         Ok(session_id)
@@ -216,8 +229,18 @@ impl SftpManager {
     }
 
     /// Stream-based download: reads remote file in chunks to avoid OOM on large files.
-    pub async fn download(&self, session_id: &str, remote_path: &str, local_path: &str) -> Result<()> {
-        log::info!("SFTP download: {} -> {} (session={})", remote_path, local_path, session_id);
+    pub async fn download(
+        &self,
+        session_id: &str,
+        remote_path: &str,
+        local_path: &str,
+    ) -> Result<()> {
+        log::info!(
+            "SFTP download: {} -> {} (session={})",
+            remote_path,
+            local_path,
+            session_id
+        );
         let session = self.get_session(session_id).await?;
 
         if let Some(parent) = std::path::Path::new(local_path).parent() {
@@ -253,8 +276,18 @@ impl SftpManager {
     }
 
     /// Stream-based upload: reads local file in chunks to avoid OOM on large files.
-    pub async fn upload(&self, session_id: &str, local_path: &str, remote_path: &str) -> Result<()> {
-        log::info!("SFTP upload: {} -> {} (session={})", local_path, remote_path, session_id);
+    pub async fn upload(
+        &self,
+        session_id: &str,
+        local_path: &str,
+        remote_path: &str,
+    ) -> Result<()> {
+        log::info!(
+            "SFTP upload: {} -> {} (session={})",
+            local_path,
+            remote_path,
+            session_id
+        );
         let session = self.get_session(session_id).await?;
 
         let mut local_file = tokio::fs::File::open(local_path)
@@ -303,7 +336,12 @@ impl SftpManager {
     }
 
     pub async fn remove(&self, session_id: &str, path: &str, is_dir: bool) -> Result<()> {
-        log::info!("SFTP remove: session={}, path={}, is_dir={}", session_id, path, is_dir);
+        log::info!(
+            "SFTP remove: session={}, path={}, is_dir={}",
+            session_id,
+            path,
+            is_dir
+        );
         let session = self.get_session(session_id).await?;
 
         if is_dir {
@@ -323,7 +361,12 @@ impl SftpManager {
     }
 
     pub async fn rename(&self, session_id: &str, old_path: &str, new_path: &str) -> Result<()> {
-        log::info!("SFTP rename: session={}, {} -> {}", session_id, old_path, new_path);
+        log::info!(
+            "SFTP rename: session={}, {} -> {}",
+            session_id,
+            old_path,
+            new_path
+        );
         let session = self.get_session(session_id).await?;
 
         session
@@ -335,7 +378,12 @@ impl SftpManager {
     }
 
     pub async fn chmod(&self, session_id: &str, path: &str, mode: u32) -> Result<()> {
-        log::debug!("SFTP chmod: session={}, path={}, mode={:o}", session_id, path, mode);
+        log::debug!(
+            "SFTP chmod: session={}, path={}, mode={:o}",
+            session_id,
+            path,
+            mode
+        );
         let session = self.get_session(session_id).await?;
 
         let mut attrs = FileAttributes::empty();

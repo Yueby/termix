@@ -60,7 +60,12 @@ pub async fn ssh_connect(
         )
         .await
         .map_err(|e| {
-            log::error!("ssh_connect failed for {}:{}: {}", payload.host, payload.port, e);
+            log::error!(
+                "ssh_connect failed for {}:{}: {}",
+                payload.host,
+                payload.port,
+                e
+            );
             e.to_string()
         })?;
 
@@ -72,13 +77,10 @@ pub async fn ssh_disconnect(
     session_id: String,
     ssh_manager: State<'_, SshManager>,
 ) -> Result<(), String> {
-    ssh_manager
-        .disconnect(&session_id)
-        .await
-        .map_err(|e| {
-            log::warn!("ssh_disconnect failed for session {}: {}", session_id, e);
-            e.to_string()
-        })
+    ssh_manager.disconnect(&session_id).await.map_err(|e| {
+        log::warn!("ssh_disconnect failed for session {}: {}", session_id, e);
+        e.to_string()
+    })
 }
 
 #[tauri::command]
@@ -107,8 +109,6 @@ pub async fn ssh_resize(
 }
 
 #[tauri::command]
-pub async fn ssh_list_sessions(
-    ssh_manager: State<'_, SshManager>,
-) -> Result<Vec<String>, String> {
+pub async fn ssh_list_sessions(ssh_manager: State<'_, SshManager>) -> Result<Vec<String>, String> {
     Ok(ssh_manager.list_sessions().await)
 }
