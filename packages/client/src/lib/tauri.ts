@@ -1,4 +1,5 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { vaultChanged } from "@/lib/auto-sync-signal";
 
 export type ProxyKind = "socks5" | "http";
 
@@ -182,10 +183,10 @@ export const getConnections = () =>
   invoke<ConnectionInfo[]>("get_connections");
 
 export const saveConnection = (conn: ConnectionInfo) =>
-  invoke<void>("save_connection", { conn });
+  invoke<void>("save_connection", { conn }).then(vaultChanged);
 
 export const deleteConnection = (id: string) =>
-  invoke<void>("delete_connection", { id });
+  invoke<void>("delete_connection", { id }).then(vaultChanged);
 
 // Settings CRUD
 export type SyncBackend = "none" | "webdav" | "termix";
@@ -237,10 +238,10 @@ export const getSnippets = () =>
   invoke<Snippet[]>("get_snippets");
 
 export const saveSnippet = (snippet: Snippet) =>
-  invoke<void>("save_snippet", { snippet });
+  invoke<void>("save_snippet", { snippet }).then(vaultChanged);
 
 export const deleteSnippet = (id: string) =>
-  invoke<void>("delete_snippet", { id });
+  invoke<void>("delete_snippet", { id }).then(vaultChanged);
 
 // Keychain CRUD
 export interface KeychainItem {
@@ -257,10 +258,10 @@ export const getKeychainItems = () =>
   invoke<KeychainItem[]>("get_keychain_items");
 
 export const saveKeychainItem = (item: KeychainItem) =>
-  invoke<void>("save_keychain_item", { item });
+  invoke<void>("save_keychain_item", { item }).then(vaultChanged);
 
 export const deleteKeychainItem = (id: string) =>
-  invoke<void>("delete_keychain_item", { id });
+  invoke<void>("delete_keychain_item", { id }).then(vaultChanged);
 
 export const importKeyFile = (path: string) =>
   invoke<string>("import_key_file", { path });

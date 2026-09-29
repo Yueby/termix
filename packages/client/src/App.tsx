@@ -45,6 +45,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/toaster";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Download, Loader2 } from "lucide-react";
+import { pullAtStartup, startAutoSync } from "@/lib/auto-sync";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 function SlidingPanel({ open, children, onClose }: { open: boolean; children: React.ReactNode; onClose?: () => void }) {
@@ -78,15 +79,20 @@ function App() {
   const { status: updateStatus, update, progress: updateProgress, downloadAndInstall, dismiss: dismissUpdate } = useUpdateStore();
 
   useEffect(() => {
+    startAutoSync();
     Promise.all([
       useSettingsStore.getState().loadSettings(),
       useConnectionStore.getState().loadConnections(),
       useSnippetStore.getState().loadSnippets(),
       useKeychainStore.getState().loadItems(),
-    ]).finally(() => {
-      getCurrentWindow().show();
-      setTimeout(() => useUpdateStore.getState().checkForUpdate(), 3000);
-    });
+    ])
+      .finally(() => {
+        getCurrentWindow().show();
+        setTimeout(() => useUpdateStore.getState().checkForUpdate(), 3000);
+      })
+      // After the settings this just loaded, and after the window is up: an unreachable
+      // remote must not be able to hold the app closed.
+      .then(() => void pullAtStartup());
   }, []);
 
   const {

@@ -226,12 +226,13 @@ async fn termix_push(db: &Database, settings: &AppSettings) -> Result<String, St
             Ok(format!("Pushed version {next}"))
         }
         PushOutcome::Conflict { server_version } => {
-            // The remote moved on while this machine was working. Pull rather than force:
-            // the server's version is the one that was accepted, and overwriting it would
-            // discard whatever the other machine wrote.
-            let summary = termix_pull(db, settings).await?;
+            // Deliberately not pulling here. A pull applies the remote vault wholesale, so
+            // doing it automatically would discard whatever this machine had not pushed yet
+            // — and it would do it while nobody was looking. Reporting it leaves the choice,
+            // and the data, with the person it belongs to.
             Ok(format!(
-                "The server already had version {server_version}; pulled it instead ({summary})"
+                "The server already holds version {server_version}, which is newer than this \
+                 machine's. Pull first to bring it in, then push again."
             ))
         }
     }
