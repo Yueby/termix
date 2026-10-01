@@ -23,7 +23,7 @@ jobs:
     name: Regenerate notes for the latest tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history and all tags: git-cliff needs them to find the tag's range.
           fetch-depth: 0
