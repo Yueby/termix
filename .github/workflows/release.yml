@@ -34,7 +34,7 @@ jobs:
     name: Verify the release is coherent
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Build the tag that was asked for. A manual run used to check out whatever
           # revision it was dispatched from and then label those assets with the requested
@@ -123,15 +123,15 @@ jobs:
             targets: ""
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       # Version comes from `packageManager` — do not pin it here too.
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -169,7 +169,7 @@ jobs:
           config: .github/cliff.toml
           args: --latest --strip header
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Updater artifacts are signed with this key; the matching public key lives in
